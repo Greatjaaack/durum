@@ -3,15 +3,33 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime
 
-from db import Database
+from app.db import Database
 
 
 def _fmt_number(value: float, suffix: str = "") -> str:
+    """Форматирует число для отображения в отчёте.
+
+    Args:
+        value: Числовое значение.
+        suffix: Постфикс после числа.
+
+    Returns:
+        Отформатированная строка числа.
+    """
     text = f"{value:.2f}".rstrip("0").rstrip(".")
     return f"{text}{suffix}"
 
 
 async def build_daily_report(db: Database, report_date: str) -> str:
+    """Собирает дневной отчёт по сменам, остаткам и заказам.
+
+    Args:
+        db: Экземпляр базы данных.
+        report_date: Дата отчёта в формате YYYY-MM-DD.
+
+    Returns:
+        Текст дневного отчёта.
+    """
     datetime.strptime(report_date, "%Y-%m-%d")
 
     shifts = await db.get_shifts_by_date(report_date)

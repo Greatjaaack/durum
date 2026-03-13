@@ -1,10 +1,12 @@
 services:
   bot:
     build: .
-    restart: always
+    restart: unless-stopped
     env_file:
       - .env
     environment:
       DB_PATH: /data/shifts.db
+      LOG_DIR: /app/logs
     volumes:
       - ./data:/data
+      - ./logs:/app/logs

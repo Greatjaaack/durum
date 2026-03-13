@@ -4,15 +4,19 @@ ENV POETRY_VERSION=1.8.3 \
     POETRY_NO_INTERACTION=1 \
     POETRY_VIRTUALENVS_CREATE=false \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    DB_PATH=/data/shifts.db \
+    LOG_DIR=/app/logs
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}"
+RUN python -m pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 
-COPY pyproject.toml /app/
-RUN poetry install --no-ansi
+COPY pyproject.toml poetry.lock* /app/
+RUN poetry install --no-ansi --only main --no-root
 
-COPY app/ /app/
+COPY app/ /app/app/
+COPY README.md /app/README.md
+RUN mkdir -p /app/logs /data
 
-CMD ["python", "bot.py"]
+ENTRYPOINT ["python", "-m", "app.bot"]

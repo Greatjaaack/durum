@@ -3,3 +3,6 @@ __pycache__/
 *.py[cod]
 .venv/
 data/
+logs/
+*.db
+*.sqlite3
