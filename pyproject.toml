@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "durum-shift-bot"
+version = "0.1.0"
+description = "Telegram bot for managing durum shop shifts."
+authors = ["Durum Team"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.13,<4.0"
+aiogram = "^3.7.0"
+apscheduler = "^3.10.4"
+python-dotenv = "^1.0.1"
+
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"
