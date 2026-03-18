@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from app.config import Settings
 from app.db import Database
-from app.handlers.constants import STOCK_ALERT_THRESHOLD, STOCK_REFERENCE_LEVELS
+from app.handlers.constants import MENU_STOCK, STOCK_ALERT_THRESHOLD, STOCK_REFERENCE_LEVELS
 from app.handlers.states import StockStates
 from app.handlers.utils import employee_name, notify_owner, now_local, parse_non_negative_number
 
@@ -43,6 +43,7 @@ def _restore_stock_payload(
 
 
 @stock_router.message(Command("stock"))
+@stock_router.message(F.text == MENU_STOCK)
 async def stock_start(
     message: Message,
     state: FSMContext,

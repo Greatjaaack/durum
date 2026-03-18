@@ -18,7 +18,7 @@ DEFAULT_AI_MAX_INPUT_CHARS = 1000
 DEFAULT_AI_REQUEST_TIMEOUT_SEC = 45
 
 # Путь до SQLite-файла по умолчанию.
-DEFAULT_DB_PATH = "shifts.db"
+DEFAULT_DB_PATH = "data/shifts.db"
 
 # Путь до директории с файлами логов по умолчанию.
 DEFAULT_LOG_DIR = "logs"

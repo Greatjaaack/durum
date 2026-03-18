@@ -32,6 +32,7 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="stock", description="Ввод остатков"),
         BotCommand(command="problem", description="Сообщение о проблеме"),
         BotCommand(command="report", description="Отчёт за дату"),
+        BotCommand(command="reports", description="Интерактивные отчёты"),
         BotCommand(command="fact", description="Последний факт о еде"),
         BotCommand(command="ai", description="Включить AI режим"),
         BotCommand(command="stop", description="Выключить AI режим"),
@@ -50,7 +51,7 @@ async def main() -> None:
         None.
     """
     settings = load_settings()
-    configure_logging(settings.log_dir)
+    configure_logging(settings.log_dir, settings.timezone)
     db = Database(settings.db_path)
     await db.init()
     ai_client = OpenRouterClient(
@@ -67,7 +68,7 @@ async def main() -> None:
     dispatcher["settings"] = settings
     dispatcher["ai_client"] = ai_client
 
-    scheduler = setup_scheduler(bot, db, settings, ai_client)
+    scheduler = setup_scheduler(bot, db, settings)
     scheduler.start()
     try:
         await set_commands(bot)

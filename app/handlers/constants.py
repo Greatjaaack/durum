@@ -12,14 +12,12 @@ STOCK_REFERENCE_LEVELS = {
 # Порог, ниже которого остаток считается потенциально критичным.
 STOCK_ALERT_THRESHOLD = 0.30
 
-# Ключ в FSM-данных для временного состояния ввода остатка при закрытии.
-CLOSE_RESIDUAL_PENDING_KEY = "close_residual_pending"
-
 # Обязательные ключи остатков, без которых закрытие смены блокируется.
 CLOSE_REQUIRED_RESIDUAL_KEYS = (
     "marinated_chicken",
     "fried_chicken",
     "lavash",
+    "fried_lavash",
     "soup",
     "sauce",
 )
@@ -49,3 +47,20 @@ ORDER_MESSAGE_ID_KEY = "order_message_id"
 
 # Ключ FSM-данных: тип текущего заказа.
 ORDER_TYPE_KEY = "order_type"
+
+# Тексты кнопок главного меню (reply keyboard).
+MENU_OPEN_SHIFT = "▶ Открыть смену"
+MENU_MID_SHIFT = "📝 Ведение смены"
+MENU_CLOSE_SHIFT = "🔒 Закрыть смену"
+MENU_MORE = "📦 Дополнительно"
+MENU_BACK = "⬅ Назад"
+MENU_ORDER_PRODUCTS = "📦 Заказ продуктов"
+MENU_ORDER_SUPPLIES = "🧴 Заказ хозтоваров"
+MENU_STOCK = "📊 Остатки"
+MENU_PROBLEM = "⚠ Проблема"
+MENU_REPORT_BY_DATE = "Отчёт за дату"
+MENU_REPORTS = "Отчёты"
+MENU_FACT = "🍔 Факт"
+MENU_AI_ENABLE = "AI режим"
+MENU_AI_DISABLE = "Отключить AI"
+MENU_CANCEL = "Отмена"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.filters.command import CommandObject
 from aiogram.fsm.context import FSMContext
@@ -10,8 +10,20 @@ from aiogram.types import Message
 
 from app.config import Settings
 from app.db import Database
+from app.handlers.constants import (
+    MENU_BACK,
+    MENU_CANCEL,
+    MENU_MORE,
+    MENU_PROBLEM,
+    MENU_REPORT_BY_DATE,
+)
 from app.handlers.states import ProblemStates
-from app.handlers.utils import build_main_menu_keyboard, employee_name, notify_owner
+from app.handlers.utils import (
+    build_additional_menu_keyboard,
+    build_shift_menu_keyboard,
+    employee_name,
+    notify_owner,
+)
 from app.reports import build_daily_report
 
 
@@ -19,11 +31,51 @@ logger = logging.getLogger(__name__)
 misc_router = Router()
 
 
+async def _is_shift_open_for_user(
+    db: Database,
+    telegram_id: int,
+) -> bool:
+    """Проверяет, открыта ли смена у сотрудника.
+
+    Args:
+        db: Экземпляр базы данных.
+        telegram_id: Telegram ID сотрудника.
+
+    Returns:
+        True, если смена открыта.
+    """
+    active_shift = await db.get_active_shift(telegram_id)
+    return active_shift is not None
+
+
 @misc_router.message(Command("start"))
 async def start_command(
     message: Message,
+    db: Database,
 ) -> None:
     """Отправляет стартовое сообщение и главное меню.
+
+    Args:
+        message: Входящее сообщение Telegram.
+        db: Экземпляр базы данных.
+
+    Returns:
+        None.
+    """
+    is_shift_open = False
+    if message.from_user:
+        is_shift_open = await _is_shift_open_for_user(db, message.from_user.id)
+    await message.answer(
+        "Выберите действие:",
+        reply_markup=build_shift_menu_keyboard(is_shift_open=is_shift_open),
+    )
+
+
+@misc_router.message(F.text == MENU_MORE)
+async def open_additional_menu(
+    message: Message,
+) -> None:
+    """Открывает меню второго уровня «Дополнительно».
 
     Args:
         message: Входящее сообщение Telegram.
@@ -31,32 +83,64 @@ async def start_command(
     Returns:
         None.
     """
-    text = (
-        "Выберите действие кнопками ниже.\n"
-        "Для отчёта используйте формат: /report YYYY-MM-DD"
+    await message.answer(
+        "Дополнительные действия:",
+        reply_markup=build_additional_menu_keyboard(),
     )
-    await message.answer(text, reply_markup=build_main_menu_keyboard())
+
+
+@misc_router.message(F.text == MENU_BACK)
+async def back_to_main_menu(
+    message: Message,
+    db: Database,
+) -> None:
+    """Возвращает пользователя на первый уровень меню.
+
+    Args:
+        message: Входящее сообщение Telegram.
+        db: Экземпляр базы данных.
+
+    Returns:
+        None.
+    """
+    is_shift_open = False
+    if message.from_user:
+        is_shift_open = await _is_shift_open_for_user(db, message.from_user.id)
+    await message.answer(
+        "Главное меню:",
+        reply_markup=build_shift_menu_keyboard(is_shift_open=is_shift_open),
+    )
 
 
 @misc_router.message(Command("cancel"))
+@misc_router.message(F.text == MENU_CANCEL)
 async def cancel_state(
     message: Message,
     state: FSMContext,
+    db: Database,
 ) -> None:
     """Сбрасывает текущее FSM-состояние пользователя.
 
     Args:
         message: Входящее сообщение Telegram.
         state: FSM-контекст пользователя.
+        db: Экземпляр базы данных.
 
     Returns:
         None.
     """
     await state.clear()
-    await message.answer("Текущее действие отменено.")
+    is_shift_open = False
+    if message.from_user:
+        is_shift_open = await _is_shift_open_for_user(db, message.from_user.id)
+    await message.answer(
+        "Действие отменено.",
+        reply_markup=build_shift_menu_keyboard(is_shift_open=is_shift_open),
+    )
 
 
 @misc_router.message(Command("problem"))
+@misc_router.message(F.text == MENU_PROBLEM)
 async def problem_start(
     message: Message,
     state: FSMContext,
@@ -152,3 +236,18 @@ async def report_for_date(
         return
 
     await message.answer(report_text)
+
+
+@misc_router.message(F.text == MENU_REPORT_BY_DATE)
+async def report_help_from_menu(
+    message: Message,
+) -> None:
+    """Подсказывает формат команды отчёта по дате.
+
+    Args:
+        message: Входящее сообщение Telegram.
+
+    Returns:
+        None.
+    """
+    await message.answer("Для отчёта по дате используйте команду: /report YYYY-MM-DD")

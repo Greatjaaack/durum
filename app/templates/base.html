@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Durum Dashboard{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js" defer></script>
+  <script src="{{ url_for('static', path='dashboard.js') }}" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__title">Центр контроля дюрюмной</div>
+    <div class="topbar__subtitle">Операционный контроль смен и остатков</div>
+  </header>
+  <main class="layout">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

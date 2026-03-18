@@ -7,6 +7,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from app.units_config import UNITS_CONFIG
+
 
 class Database:
     def __init__(self, db_path: str | Path) -> None:
@@ -104,6 +106,188 @@ class Database:
             )
             self._conn.commit()
 
+    def _ensure_shift_audit_columns(self) -> None:
+        """Проверяет и синхронизирует колонки аудита открытия/закрытия смены.
+
+        Args:
+            Нет параметров.
+
+        Returns:
+            None.
+        """
+        with self._lock:
+            rows = self._conn.execute("PRAGMA table_info(shifts)").fetchall()
+            columns = {str(row["name"]) for row in rows}
+            if "opened_at" not in columns:
+                self._conn.execute("ALTER TABLE shifts ADD COLUMN opened_at TEXT")
+            if "closed_at" not in columns:
+                self._conn.execute("ALTER TABLE shifts ADD COLUMN closed_at TEXT")
+            if "opened_by" not in columns:
+                self._conn.execute("ALTER TABLE shifts ADD COLUMN opened_by TEXT")
+            if "close_started_at" not in columns:
+                self._conn.execute("ALTER TABLE shifts ADD COLUMN close_started_at TEXT")
+            if "closed_by_id" not in columns:
+                self._conn.execute("ALTER TABLE shifts ADD COLUMN closed_by_id INTEGER")
+            if "closed_by_name" not in columns:
+                self._conn.execute("ALTER TABLE shifts ADD COLUMN closed_by_name TEXT")
+            if "close_duration_sec" not in columns:
+                self._conn.execute("ALTER TABLE shifts ADD COLUMN close_duration_sec INTEGER")
+
+            self._conn.execute(
+                """
+                UPDATE shifts
+                SET opened_at = COALESCE(NULLIF(opened_at, ''), open_time)
+                WHERE opened_at IS NULL OR opened_at = ''
+                """
+            )
+            self._conn.execute(
+                """
+                UPDATE shifts
+                SET closed_at = COALESCE(NULLIF(closed_at, ''), close_time)
+                WHERE close_time IS NOT NULL AND (closed_at IS NULL OR closed_at = '')
+                """
+            )
+            self._conn.execute(
+                """
+                UPDATE shifts
+                SET opened_by = COALESCE(NULLIF(opened_by, ''), employee)
+                WHERE opened_by IS NULL OR opened_by = ''
+                """
+            )
+            self._conn.execute(
+                """
+                UPDATE shifts
+                SET closed_by_name = COALESCE(NULLIF(closed_by_name, ''), employee)
+                WHERE close_time IS NOT NULL AND (closed_by_name IS NULL OR closed_by_name = '')
+                """
+            )
+            self._conn.execute(
+                """
+                UPDATE shifts
+                SET close_started_at = COALESCE(NULLIF(close_started_at, ''), close_time, open_time)
+                WHERE close_time IS NOT NULL AND (close_started_at IS NULL OR close_started_at = '')
+                """
+            )
+            self._conn.commit()
+
+    def _ensure_close_residual_columns(self) -> None:
+        """Проверяет и синхронизирует поля нормализации остатков закрытия.
+
+        Args:
+            Нет параметров.
+
+        Returns:
+            None.
+        """
+        with self._lock:
+            rows = self._conn.execute("PRAGMA table_info(close_residuals)").fetchall()
+            if not rows:
+                return
+
+            columns = {str(row["name"]) for row in rows}
+            if "input_value" not in columns:
+                self._conn.execute("ALTER TABLE close_residuals ADD COLUMN input_value REAL")
+            if "unit_type" not in columns:
+                self._conn.execute("ALTER TABLE close_residuals ADD COLUMN unit_type TEXT")
+            if "normalized_quantity" not in columns:
+                self._conn.execute("ALTER TABLE close_residuals ADD COLUMN normalized_quantity REAL")
+            if "normalized_unit" not in columns:
+                self._conn.execute("ALTER TABLE close_residuals ADD COLUMN normalized_unit TEXT")
+
+            self._conn.execute(
+                """
+                UPDATE close_residuals
+                SET input_value = COALESCE(input_value, quantity)
+                WHERE input_value IS NULL
+                """
+            )
+            self._conn.execute(
+                """
+                UPDATE close_residuals
+                SET normalized_quantity = COALESCE(normalized_quantity, quantity)
+                WHERE normalized_quantity IS NULL
+                """
+            )
+            self._conn.execute(
+                """
+                UPDATE close_residuals
+                SET normalized_unit = COALESCE(NULLIF(normalized_unit, ''), unit)
+                WHERE normalized_unit IS NULL OR normalized_unit = ''
+                """
+            )
+            self._conn.execute(
+                """
+                UPDATE close_residuals
+                SET unit_type = COALESCE(NULLIF(unit_type, ''), 'legacy')
+                WHERE unit_type IS NULL OR unit_type = ''
+                """
+            )
+
+            # Конвертация legacy-данных в нормализованный формат.
+            self._conn.execute(
+                """
+                UPDATE close_residuals
+                SET
+                    unit_type = 'weight_g',
+                    input_value = CASE
+                        WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity * 1000.0
+                        ELSE quantity
+                    END,
+                    normalized_quantity = CASE
+                        WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity * 1000.0
+                        ELSE quantity
+                    END,
+                    normalized_unit = 'г'
+                WHERE unit_type = 'legacy' AND item_key IN ('marinated_chicken', 'fried_chicken')
+                """
+            )
+            self._conn.execute(
+                """
+                UPDATE close_residuals
+                SET
+                    unit_type = 'piece',
+                    input_value = quantity,
+                    normalized_quantity = quantity,
+                    normalized_unit = 'шт'
+                WHERE unit_type = 'legacy' AND item_key = 'lavash'
+                """
+            )
+            self._conn.execute(
+                """
+                UPDATE close_residuals
+                SET
+                    unit_type = 'portion',
+                    input_value = quantity,
+                    normalized_quantity = quantity,
+                    normalized_unit = 'порц'
+                WHERE unit_type = 'legacy' AND item_key = 'soup'
+                """
+            )
+            self._conn.execute(
+                """
+                UPDATE close_residuals
+                SET
+                    unit_type = 'sauce_gastro',
+                    input_value = CASE
+                        WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml')
+                            THEN quantity / ?
+                        ELSE quantity
+                    END,
+                    normalized_quantity = CASE
+                        WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml')
+                            THEN quantity
+                        ELSE quantity * ?
+                    END,
+                    normalized_unit = 'мл'
+                WHERE unit_type = 'legacy' AND item_key = 'sauce'
+                """,
+                (
+                    UNITS_CONFIG["sauce_gastro"],
+                    UNITS_CONFIG["sauce_gastro"],
+                ),
+            )
+            self._conn.commit()
+
     async def init(self) -> None:
         """Инициализирует схему базы данных и миграции.
 
@@ -121,6 +305,13 @@ class Database:
             date TEXT NOT NULL,
             open_time TEXT NOT NULL,
             close_time TEXT,
+            opened_at TEXT,
+            closed_at TEXT,
+            opened_by TEXT,
+            close_started_at TEXT,
+            closed_by_id INTEGER,
+            closed_by_name TEXT,
+            close_duration_sec INTEGER,
             status TEXT NOT NULL DEFAULT 'OPEN',
             revenue REAL,
             photo TEXT,
@@ -167,6 +358,10 @@ class Database:
             item_label TEXT NOT NULL,
             quantity REAL NOT NULL,
             unit TEXT NOT NULL,
+            input_value REAL,
+            unit_type TEXT,
+            normalized_quantity REAL,
+            normalized_unit TEXT,
             date TEXT NOT NULL,
             time TEXT NOT NULL,
             employee TEXT,
@@ -198,6 +393,8 @@ class Database:
         """
         await asyncio.to_thread(self._execute_script, schema)
         await asyncio.to_thread(self._ensure_shift_status_column)
+        await asyncio.to_thread(self._ensure_shift_audit_columns)
+        await asyncio.to_thread(self._ensure_close_residual_columns)
         await asyncio.to_thread(
             self._execute_script,
             "CREATE INDEX IF NOT EXISTS idx_shifts_status ON shifts(status);",
@@ -223,11 +420,28 @@ class Database:
             Идентификатор созданной смены.
         """
         query = """
-        INSERT INTO shifts (employee, employee_id, date, open_time, status)
-        VALUES (?, ?, ?, ?, 'OPEN')
+        INSERT INTO shifts (
+            employee,
+            employee_id,
+            date,
+            open_time,
+            opened_at,
+            opened_by,
+            status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, 'OPEN')
         """
         return await asyncio.to_thread(
-            self._execute, query, (employee, employee_id, shift_date, open_time)
+            self._execute,
+            query,
+            (
+                employee,
+                employee_id,
+                shift_date,
+                open_time,
+                open_time,
+                employee,
+            ),
         )
 
     async def get_active_shift(self, employee_id: int) -> dict[str, Any] | None:
@@ -356,6 +570,10 @@ class Database:
         item_label: str,
         quantity: float,
         unit: str,
+        input_value: float | None,
+        unit_type: str | None,
+        normalized_quantity: float | None,
+        normalized_unit: str | None,
         residual_date: str,
         residual_time: str,
         employee: str | None = None,
@@ -369,6 +587,10 @@ class Database:
             item_label: Название остатка.
             quantity: Количество остатка.
             unit: Единица измерения.
+            input_value: Значение в интерфейсной единице.
+            unit_type: Тип единицы для нормализации.
+            normalized_quantity: Нормализованное значение.
+            normalized_unit: Базовая единица нормализации.
             residual_date: Дата фиксации.
             residual_time: Время фиксации.
             employee: Имя сотрудника.
@@ -379,13 +601,29 @@ class Database:
         """
         query = """
         INSERT INTO close_residuals (
-            shift_id, item_key, item_label, quantity, unit, date, time, employee, employee_id
+            shift_id,
+            item_key,
+            item_label,
+            quantity,
+            unit,
+            input_value,
+            unit_type,
+            normalized_quantity,
+            normalized_unit,
+            date,
+            time,
+            employee,
+            employee_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(shift_id, item_key) DO UPDATE
         SET item_label = excluded.item_label,
             quantity = excluded.quantity,
             unit = excluded.unit,
+            input_value = excluded.input_value,
+            unit_type = excluded.unit_type,
+            normalized_quantity = excluded.normalized_quantity,
+            normalized_unit = excluded.normalized_unit,
             date = excluded.date,
             time = excluded.time,
             employee = excluded.employee,
@@ -400,6 +638,10 @@ class Database:
                 item_label,
                 quantity,
                 unit,
+                input_value,
+                unit_type,
+                normalized_quantity,
+                normalized_unit,
                 residual_date,
                 residual_time,
                 employee,
@@ -417,17 +659,39 @@ class Database:
             Словарь остатков по ключу item_key.
         """
         query = """
-        SELECT item_key, item_label, quantity, unit, date, time, employee, employee_id
+        SELECT
+            item_key,
+            item_label,
+            quantity,
+            unit,
+            input_value,
+            unit_type,
+            normalized_quantity,
+            normalized_unit,
+            date,
+            time,
+            employee,
+            employee_id
         FROM close_residuals
         WHERE shift_id = ?
         """
         rows = await asyncio.to_thread(self._fetchall, query, (shift_id,))
         result: dict[str, dict[str, Any]] = {}
         for row in rows:
+            normalized_quantity = (
+                float(row["normalized_quantity"])
+                if row["normalized_quantity"] is not None
+                else None
+            )
+            input_value = float(row["input_value"]) if row["input_value"] is not None else None
             result[str(row["item_key"])] = {
                 "item_label": row["item_label"],
                 "quantity": float(row["quantity"]),
                 "unit": row["unit"],
+                "input_value": input_value,
+                "unit_type": row["unit_type"],
+                "normalized_quantity": normalized_quantity,
+                "normalized_unit": row["normalized_unit"],
                 "date": row["date"],
                 "time": row["time"],
                 "employee": row["employee"],
@@ -448,15 +712,40 @@ class Database:
         query = "UPDATE shifts SET meat_start = ? WHERE id = ?"
         await asyncio.to_thread(self._execute, query, (meat_start, shift_id))
 
+    async def mark_close_flow_started(
+        self,
+        *,
+        shift_id: int,
+        started_at: str,
+    ) -> None:
+        """Фиксирует момент запуска сценария закрытия смены.
+
+        Args:
+            shift_id: Идентификатор смены.
+            started_at: Время старта сценария закрытия.
+
+        Returns:
+            None.
+        """
+        query = """
+        UPDATE shifts
+        SET close_started_at = COALESCE(NULLIF(close_started_at, ''), ?)
+        WHERE id = ?
+        """
+        await asyncio.to_thread(self._execute, query, (started_at, shift_id))
+
     async def close_shift(
         self,
         *,
         shift_id: int,
         close_time: str,
-        revenue: float,
-        photo: str,
+        revenue: float | None = None,
+        photo: str | None = None,
         meat_end: float,
         lavash_end: float,
+        closed_by_id: int | None = None,
+        closed_by_name: str | None = None,
+        close_duration_sec: int | None = None,
     ) -> float | None:
         """Закрывает смену и рассчитывает расход мяса.
 
@@ -467,6 +756,9 @@ class Database:
             photo: Идентификатор фото.
             meat_end: Остаток мяса.
             lavash_end: Остаток лаваша.
+            closed_by_id: Telegram ID сотрудника, закрывшего смену.
+            closed_by_name: Имя сотрудника, закрывшего смену.
+            close_duration_sec: Длительность закрытия в секундах.
 
         Returns:
             Расход мяса или None, если стартовое значение отсутствует.
@@ -480,18 +772,34 @@ class Database:
         query = """
         UPDATE shifts
         SET close_time = ?,
+            closed_at = ?,
             status = 'CLOSED',
             revenue = ?,
             photo = ?,
             meat_end = ?,
             meat_used = ?,
-            lavash_end = ?
+            lavash_end = ?,
+            closed_by_id = ?,
+            closed_by_name = ?,
+            close_duration_sec = ?
         WHERE id = ?
         """
         await asyncio.to_thread(
             self._execute,
             query,
-            (close_time, revenue, photo, meat_end, meat_used, lavash_end, shift_id),
+            (
+                close_time,
+                close_time,
+                revenue,
+                photo,
+                meat_end,
+                meat_used,
+                lavash_end,
+                closed_by_id,
+                closed_by_name,
+                close_duration_sec,
+                shift_id,
+            ),
         )
         return meat_used
 
@@ -580,24 +888,6 @@ class Database:
         rows = await asyncio.to_thread(self._fetchall, query)
         return [int(row["employee_id"]) for row in rows]
 
-    async def has_open_shift(self) -> bool:
-        """Проверяет наличие хотя бы одной открытой смены.
-
-        Args:
-            Нет параметров.
-
-        Returns:
-            True, если открытая смена существует.
-        """
-        query = """
-        SELECT 1
-        FROM shifts
-        WHERE status = 'OPEN' OR close_time IS NULL
-        LIMIT 1
-        """
-        row = await asyncio.to_thread(self._fetchone, query)
-        return row is not None
-
     async def has_shift_opened_on(self, shift_date: str) -> bool:
         """Проверяет, была ли открыта смена в указанную дату.
 
@@ -620,8 +910,103 @@ class Database:
         Returns:
             Список смен.
         """
-        query = "SELECT * FROM shifts WHERE date = ? ORDER BY open_time ASC"
+        query = """
+        SELECT *
+        FROM shifts
+        WHERE date = ?
+        ORDER BY COALESCE(opened_at, open_time) ASC, id ASC
+        """
         return await asyncio.to_thread(self._fetchall, query, (shift_date,))
+
+    async def get_shift_dates(self, limit: int = 30) -> list[str]:
+        """Возвращает список дат, в которые были смены.
+
+        Args:
+            limit: Максимальное количество дат.
+
+        Returns:
+            Список дат в формате YYYY-MM-DD.
+        """
+        safe_limit = max(1, min(int(limit), 365))
+        query = """
+        SELECT date
+        FROM shifts
+        GROUP BY date
+        ORDER BY date DESC
+        LIMIT ?
+        """
+        rows = await asyncio.to_thread(self._fetchall, query, (safe_limit,))
+        return [str(row["date"]) for row in rows]
+
+    async def get_shift_by_id(self, shift_id: int) -> dict[str, Any] | None:
+        """Возвращает смену по идентификатору.
+
+        Args:
+            shift_id: Идентификатор смены.
+
+        Returns:
+            Словарь данных смены или None.
+        """
+        query = "SELECT * FROM shifts WHERE id = ? LIMIT 1"
+        return await asyncio.to_thread(self._fetchone, query, (shift_id,))
+
+    async def get_checklists_completion_by_shift(
+        self,
+        shift_id: int,
+    ) -> dict[str, int]:
+        """Возвращает количество выполненных пунктов по чек-листам смены.
+
+        Args:
+            shift_id: Идентификатор смены.
+
+        Returns:
+            Словарь: тип чек-листа -> число выполненных пунктов.
+        """
+        query = """
+        SELECT checklist_type, completed
+        FROM checklist_state
+        WHERE shift_id = ?
+        """
+        rows = await asyncio.to_thread(self._fetchall, query, (shift_id,))
+        result: dict[str, int] = {}
+        for row in rows:
+            checklist_type = str(row.get("checklist_type", "")).strip()
+            completed_raw = row.get("completed", "[]")
+            try:
+                completed_data = json.loads(str(completed_raw))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                completed_data = []
+            if isinstance(completed_data, list):
+                result[checklist_type] = len(
+                    {
+                        int(item)
+                        for item in completed_data
+                        if isinstance(item, int)
+                        or (isinstance(item, str) and item.strip().lstrip("-").isdigit())
+                    }
+                )
+        return result
+
+    async def get_close_residuals_by_date(
+        self,
+        residual_date: str,
+    ) -> list[dict[str, Any]]:
+        """Возвращает остатки закрытия за указанную дату.
+
+        Args:
+            residual_date: Дата в формате YYYY-MM-DD.
+
+        Returns:
+            Список строк остатков.
+        """
+        query = """
+        SELECT cr.*, s.employee AS shift_employee
+        FROM close_residuals cr
+        LEFT JOIN shifts s ON s.id = cr.shift_id
+        WHERE cr.date = ?
+        ORDER BY cr.time ASC, cr.id ASC
+        """
+        return await asyncio.to_thread(self._fetchall, query, (residual_date,))
 
     async def get_orders_by_date(
         self, shift_date: str, order_type: str | None = None
@@ -701,6 +1086,33 @@ class Database:
         LIMIT 1
         """
         return await asyncio.to_thread(self._fetchone, query)
+
+    async def get_recent_food_facts(
+        self,
+        limit: int = 10,
+    ) -> list[str]:
+        """Возвращает последние факты о еде.
+
+        Args:
+            limit: Максимальное число фактов.
+
+        Returns:
+            Список текстов фактов (от новых к старым).
+        """
+        safe_limit = max(1, min(int(limit), 50))
+        query = """
+        SELECT fact
+        FROM food_facts
+        ORDER BY id DESC
+        LIMIT ?
+        """
+        rows = await asyncio.to_thread(self._fetchall, query, (safe_limit,))
+        result: list[str] = []
+        for row in rows:
+            fact = str(row.get("fact") or "").strip()
+            if fact:
+                result.append(fact)
+        return result
 
     async def get_ai_state(self, user_id: int) -> dict[str, Any]:
         """Возвращает состояние AI-режима пользователя.

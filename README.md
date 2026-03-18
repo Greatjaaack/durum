@@ -1,132 +1,172 @@
 # Durum Shift Bot
 
-Telegram-бот для управления сменой дюрюмной: чек-листы, закрытие смены, заказы, остатки, журнал проблем, отчёты и напоминания.
+Telegram-бот для управления сменами дюрюмной: чек-листы, закрытие смены, фиксация остатков, заказы, отчёты и AI-функции.  
+В проекте есть аналитический веб-дашборд `/dashboard` (FastAPI + Jinja2 + Chart.js) для KPI, аномалий и контроля потерь.
 
-## Стек
+## 1. Описание проекта
 
-- Python 3.13
-- aiogram 3.x
-- SQLite
-- APScheduler
-- Poetry
-- Docker / Docker Compose
+Что решает бот:
+- ведёт сотрудника по чек-листам открытия, ведения и закрытия смены;
+- фиксирует остатки при закрытии и сохраняет их в SQLite;
+- формирует отчёты по дате и интерактивные отчёты через `/reports`;
+- отправляет рабочие уведомления и напоминания;
+- поддерживает AI-режим (`/ai`, `/stop`) и генерацию фактов (`/fact`).
 
-## Структура
+## 2. Как запустить
 
-```text
-app/
-  bot.py
-  config.py
-  db.py
-  ai_client.py
-  checklist_data.py
-  checklists.py
-  handlers/
-    __init__.py
-    ai.py
-    constants.py
-    misc.py
-    orders.py
-    shift.py
-    states.py
-    stock.py
-    utils.py
-  logging_setup.py
-  orders.py
-  reports.py
-  reminders.py
-pyproject.toml
-Dockerfile
-docker-compose.yml
-.env.example
-README.md
-```
-
-## Архитектура обработчиков
-
-- `app/handlers/shift.py` — сценарии смены и чек-листы (`/open`, `/mid`, `/close`).
-- `app/handlers/orders.py` — интерфейс и отправка заказов (`/order_products`, `/order_supplies`).
-- `app/handlers/stock.py` — ввод остатков (`/stock`) и уведомления о низком уровне.
-- `app/handlers/misc.py` — старт, отмена, проблемы и отчёты (`/start`, `/cancel`, `/problem`, `/report`).
-- `app/handlers/ai.py` — AI-команды и AI-диалог (`/fact`, `/ai`, `/stop`).
-- `app/handlers/__init__.py` — сборка общего `Router` из всех подроутеров.
-
-## 1. Установка Poetry
-
-Официальный способ:
-
-```bash
-curl -sSL https://install.python-poetry.org | python3 -
-```
-
-Проверьте:
-
-```bash
-poetry --version
-```
-
-## 2. Создание `.env`
-
-Скопируйте пример:
-
-```bash
-cp .env.example .env
-```
-
-Заполните значения:
-
-```env
-BOT_TOKEN=ваш_токен_бота
-OWNER_ID=telegram_id_владельца
-WORK_CHAT_ID=telegram_id_рабочего_чата
-OPENROUTER_API_KEY=ваш_openrouter_api_key
-AI_MODEL=openrouter/free
-AI_MAX_INPUT_CHARS=1000
-AI_REQUEST_TIMEOUT_SEC=45
-DB_PATH=shifts.db
-LOG_DIR=logs
-BOT_TIMEZONE=Europe/Moscow
-SHIFT_OPEN_TIME=11:00
-SHIFT_CLOSE_TIME=22:00
-```
-
-## 3. Запуск через Docker Compose
+### Вариант A: Docker Compose
 
 ```bash
 docker compose up --build
 ```
 
-База данных будет храниться в `./data/shifts.db`.
-Логи приложения будут сохраняться в `./logs/app_YYYY-MM-DD.log`.
-
-Остановка:
+Если изменили `.env`, пересоздайте контейнеры, чтобы переменные точно применились:
 
 ```bash
-docker compose down
+docker compose up -d --force-recreate
 ```
 
-## Локальный запуск без Docker
+После запуска:
+- бот работает в контейнере `bot`;
+- веб-дашборд доступен на `http://localhost:8000/dashboard`.
+
+Данные и логи:
+- база: `./data/shifts.db`
+- логи: `./logs/app_YYYY-MM-DD.log`
+
+### Вариант B: локально через Poetry
 
 ```bash
 poetry install
 poetry run python -m app.bot
 ```
 
-## Логи и данные
+Дашборд локально:
 
-- Файлы логов создаются автоматически в `LOG_DIR` (по умолчанию `./logs`).
-- SQLite-файлы базы (`*.db`) не должны храниться в репозитории и добавлены в `.gitignore`.
+```bash
+poetry run python -m uvicorn app.dashboard:app --host 0.0.0.0 --port 8000
+```
 
-## Команды бота
+### Настройка `.env`
 
-- `/open` — открыть смену
-- `/mid` — чек-лист в течение смены
-- `/close` — закрыть смену
-- `/order_products` — заказ продукции
+```bash
+cp .env.example .env
+```
+
+Минимально заполните:
+
+```env
+BOT_TOKEN=
+OWNER_ID=
+WORK_CHAT_ID=
+OPENROUTER_API_KEY=
+AI_MODEL=openrouter/free
+AI_MAX_INPUT_CHARS=1000
+AI_REQUEST_TIMEOUT_SEC=45
+DB_PATH=data/shifts.db
+LOG_DIR=logs
+BOT_TIMEZONE=Europe/Moscow
+SHIFT_OPEN_TIME=11:00
+SHIFT_CLOSE_TIME=22:00
+```
+
+## 3. Структура проекта
+
+```text
+app/
+  bot.py                 # Точка входа Telegram-бота
+  config.py              # Загрузка и валидация настроек
+  db.py                  # SQLite-слой и миграции
+  checklist_data.py      # Данные чек-листов
+  checklists.py          # Рендер текста/клавиатур чек-листов
+  orders.py              # Рендер заказов (products/supplies)
+  reports.py             # Текстовый отчёт /report YYYY-MM-DD
+  reminders.py           # Планировщик напоминаний/фактов
+  ai_client.py           # OpenRouter API клиент
+  logging_setup.py       # Логирование в daily-файлы
+  dashboard.py           # FastAPI роуты и рендер dashboard
+  dashboard_service.py   # Агрегация KPI/аномалий/аналитики для dashboard
+  units_config.py        # Конфигурация единиц (гастро/тубусы) и нормализация
+  templates/             # Jinja2-шаблоны (base/dashboard)
+  static/                # CSS и JS дашборда
+  handlers/
+    __init__.py          # Сборка всех роутеров
+    shift.py             # /open, /mid, /close и чек-листы
+    orders.py            # /order_products, /order_supplies
+    stock.py             # /stock
+    misc.py              # /start, /cancel, /problem, /report
+    reports.py           # /reports (интерактивные отчёты)
+    ai.py                # /fact, /ai, /stop
+    states.py            # FSM-состояния
+    constants.py         # Константы сценариев
+    utils.py             # Вспомогательные функции
+docs/
+  architecture.md        # Схема логики и архитектуры
+Dockerfile
+docker-compose.yml
+pyproject.toml
+```
+
+## 4. Используемые технологии
+
+- Python 3.13
+- aiogram 3.x
+- SQLite
+- APScheduler
+- FastAPI + Uvicorn
+- Jinja2 Templates
+- Chart.js
+- Poetry
+- Docker / Docker Compose
+
+## 5. Основные команды бота
+
+- `/open` — открыть смену и пройти чек-лист открытия
+- `/mid` — чек-лист ведения смены
+- `/close` — чек-лист закрытия + фиксация остатков
+- `/order_products` — заказ продуктов
 - `/order_supplies` — заказ хозтоваров
-- `/stock` — ввод остатков
-- `/problem` — сообщение о проблеме
-- `/report YYYY-MM-DD` — отчёт за дату
+- `/stock` — ручной ввод остатков
+- `/problem` — отправка проблемы владельцу
+- `/report YYYY-MM-DD` — текстовый отчёт за дату
+- `/reports` — интерактивные отчёты (смены/остатки/чек-листы)
 - `/fact` — последний факт о еде
-- `/ai` — включить AI режим
-- `/stop` — выключить AI режим
+- `/ai` — включить AI-режим
+- `/stop` — выключить AI-режим
+- `/cancel` — сброс текущего FSM-сценария
+
+## 6. Пример работы
+
+### Смена (типовой поток)
+
+1. Сотрудник отправляет `/open`.
+2. Бот показывает чек-лист открытия с прогрессом `X / Y`.
+3. После завершения смена фиксируется как `OPEN` (кто открыл, когда открыл).
+4. В течение дня сотрудник может проходить `/mid`.
+5. В конце дня сотрудник запускает `/close`, вводит остатки и фото.
+6. Бот закрывает смену (`CLOSED`), сохраняет остатки и отправляет отчёт в рабочий чат.
+
+### Интерактивные отчёты
+
+1. `/reports`
+2. Выбор типа отчёта:
+   - отчёт по сменам
+   - отчёт по остаткам
+   - отчёт по чек-листам
+3. Выбор даты
+4. Для отчёта по сменам: выбор конкретной смены и просмотр деталей.
+
+## Логирование
+
+Логирование настроено в файл на каждый день:
+
+```text
+logs/app_YYYY-MM-DD.log
+```
+
+Логируются ключевые события:
+- открытие смены;
+- закрытие смены;
+- AI-запросы;
+- генерация фактов;
+- ошибки.

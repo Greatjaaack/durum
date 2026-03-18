@@ -4,25 +4,15 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.checklist_data import CHECKLISTS, CHECKLIST_TITLES
 
-# Emoji-иконки для маркировки секций чек-листа в интерфейсе.
-SECTION_BADGES = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-
 # Максимальная длина текста inline-кнопки Telegram.
 BUTTON_TEXT_LIMIT = 64
 
-
-def _section_badge(section_index: int) -> str:
-    """Возвращает emoji-номер секции.
-
-    Args:
-        section_index: Индекс секции.
-
-    Returns:
-        Текстовый бейдж секции.
-    """
-    if 0 <= section_index < len(SECTION_BADGES):
-        return SECTION_BADGES[section_index]
-    return f"{section_index + 1}."
+# Эмодзи заголовка чек-листа по типу.
+CHECKLIST_TITLE_EMOJI = {
+    "open": "🍳",
+    "mid": "📝",
+    "close": "🔒",
+}
 
 
 def _clamp_section_index(checklist_type: str, section_index: int) -> int:
@@ -54,7 +44,30 @@ def _shorten_button_text(text: str, limit: int = BUTTON_TEXT_LIMIT) -> str:
     compact = text.strip()
     if len(compact) <= limit:
         return compact
-    return f"{compact[: limit - 1].rstrip()}…"
+    return compact[:limit].rstrip()
+
+
+def _item_button_text(
+    item_text: str,
+    mark: str,
+    limit: int = BUTTON_TEXT_LIMIT,
+) -> str:
+    """Формирует компактный текст кнопки пункта с чекбоксом.
+
+    Args:
+        item_text: Название пункта.
+        mark: Символ чекбокса.
+        limit: Ограничение длины кнопки Telegram.
+
+    Returns:
+        Строка вида `Пункт … ☐`.
+    """
+    suffix = f" {mark}"
+    item_limit = max(4, limit - len(suffix))
+    compact = item_text.strip()
+    if len(compact) > item_limit:
+        compact = compact[:item_limit].rstrip()
+    return f"{compact}{suffix}"
 
 
 def _section_start_index(checklist_type: str, section_index: int) -> int:
@@ -71,6 +84,62 @@ def _section_start_index(checklist_type: str, section_index: int) -> int:
     return sum(len(section["items"]) for section in CHECKLISTS[checklist_type][:section_index])
 
 
+def _checklist_title_with_emoji(
+    checklist_type: str,
+) -> str:
+    """Возвращает заголовок чек-листа с эмодзи.
+
+    Args:
+        checklist_type: Тип чек-листа.
+
+    Returns:
+        Заголовок вида `🍳 Открытие смены`.
+    """
+    title = CHECKLIST_TITLES[checklist_type]
+    emoji = CHECKLIST_TITLE_EMOJI.get(checklist_type, "📋")
+    return f"{emoji} {title}"
+
+
+def _progress_percent(
+    done: int,
+    total: int,
+) -> int:
+    """Считает целочисленный процент прогресса.
+
+    Args:
+        done: Выполненные пункты.
+        total: Общее число пунктов.
+
+    Returns:
+        Процент выполнения от 0 до 100.
+    """
+    if total <= 0:
+        return 0
+    return int(round((done / total) * 100))
+
+
+def _progress_bar(
+    done: int,
+    total: int,
+    width: int = 10,
+) -> str:
+    """Строит компактный прогресс-бар.
+
+    Args:
+        done: Выполненные пункты.
+        total: Общее число пунктов.
+        width: Ширина прогресс-бара.
+
+    Returns:
+        Строка вида `████░░░░░░`.
+    """
+    if total <= 0 or width <= 0:
+        return "░" * max(width, 0)
+    filled = int(round((done / total) * width))
+    filled = max(0, min(filled, width))
+    return ("█" * filled) + ("░" * (width - filled))
+
+
 def checklist_total_items(checklist_type: str) -> int:
     """Считает общее число пунктов в чек-листе.
 
@@ -81,46 +150,6 @@ def checklist_total_items(checklist_type: str) -> int:
         Общее число пунктов.
     """
     return sum(len(section["items"]) for section in CHECKLISTS[checklist_type])
-
-
-def checklist_item_text(checklist_type: str, item_index: int) -> str | None:
-    """Возвращает текст пункта по его глобальному индексу.
-
-    Args:
-        checklist_type: Тип чек-листа.
-        item_index: Глобальный индекс пункта.
-
-    Returns:
-        Текст пункта или None, если индекс вне диапазона.
-    """
-    if item_index < 0:
-        return None
-
-    cursor = 0
-    for section in CHECKLISTS[checklist_type]:
-        items = section["items"]
-        next_cursor = cursor + len(items)
-        if item_index < next_cursor:
-            return str(items[item_index - cursor]).strip()
-        cursor = next_cursor
-    return None
-
-
-def checklist_section_done_count(checklist_type: str, completed: set[int], section_index: int) -> int:
-    """Считает количество выполненных пунктов в секции.
-
-    Args:
-        checklist_type: Тип чек-листа.
-        completed: Множество выполненных индексов.
-        section_index: Индекс секции.
-
-    Returns:
-        Количество выполненных пунктов секции.
-    """
-    section_index = _clamp_section_index(checklist_type, section_index)
-    section_items = CHECKLISTS[checklist_type][section_index]["items"]
-    start_index = _section_start_index(checklist_type, section_index)
-    return sum(1 for idx in range(start_index, start_index + len(section_items)) if idx in completed)
 
 
 def checklist_section_for_item(checklist_type: str, item_index: int) -> int:
@@ -168,20 +197,21 @@ def build_checklist_text(checklist_type: str, completed: set[int], active_sectio
     """
     sections = CHECKLISTS[checklist_type]
     active_section = _clamp_section_index(checklist_type, active_section)
-    title = CHECKLIST_TITLES[checklist_type]
+    section = sections[active_section]
+
     done = len(completed)
     total = checklist_total_items(checklist_type)
-    section = sections[active_section]
-    section_done = checklist_section_done_count(checklist_type, completed, active_section)
-    section_total = len(section["items"])
+    progress_pct = _progress_percent(done, total)
+    progress_bar = _progress_bar(done, total)
 
-    lines = [title, f"Прогресс: {done} / {total}", ""]
-    lines.append(f"Блок: {_section_badge(active_section)} {section['title']} ({section_done}/{section_total})")
-    if done < total:
-        lines.append("Выберите блок или отметьте пункт кнопками ниже.")
-    else:
-        lines.append("Все пункты отмечены.")
-    return "\n".join(lines)
+    return "\n".join(
+        [
+            _checklist_title_with_emoji(checklist_type),
+            f"Блок {active_section + 1} — {section['title']}",
+            f"Прогресс: {done} / {total}",
+            f"{progress_bar} {progress_pct}%",
+        ]
+    )
 
 
 def build_checklist_keyboard(
@@ -203,33 +233,37 @@ def build_checklist_keyboard(
     active_section = _clamp_section_index(checklist_type, active_section)
     rows: list[list[InlineKeyboardButton]] = []
 
-    for section_index, section in enumerate(sections):
-        section_done = checklist_section_done_count(checklist_type, completed, section_index)
-        section_total = len(section["items"])
-        marker = "▶️" if section_index == active_section else "▫️"
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=_shorten_button_text(
-                        f"{marker} {_section_badge(section_index)} {section['title']} {section_done}/{section_total}"
-                    ),
-                    callback_data=f"checklist:{checklist_type}:section:{section_index}",
-                )
-            ]
-        )
-
     start_index = _section_start_index(checklist_type, active_section)
     active_items = sections[active_section]["items"]
     for local_index, item in enumerate(active_items):
         item_index = start_index + local_index
-        mark = "☑" if item_index in completed else "⬜"
+        mark = "☑" if item_index in completed else "☐"
+        item_callback = f"checklist:{checklist_type}:item:{item_index}"
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=_shorten_button_text(f"{mark} {item.strip()}"),
-                    callback_data=f"checklist:{checklist_type}:item:{item_index}",
-                )
+                    text=_item_button_text(item, mark),
+                    callback_data=item_callback,
+                ),
             ]
         )
+
+    nav_row: list[InlineKeyboardButton] = []
+    if active_section > 0:
+        nav_row.append(
+            InlineKeyboardButton(
+                text="← Назад",
+                callback_data=f"checklist:{checklist_type}:section:{active_section - 1}",
+            )
+        )
+    if active_section < len(sections) - 1:
+        nav_row.append(
+            InlineKeyboardButton(
+                text="➡",
+                callback_data=f"checklist:{checklist_type}:section:{active_section + 1}",
+            )
+        )
+    if nav_row:
+        rows.append(nav_row)
 
     return InlineKeyboardMarkup(inline_keyboard=rows)

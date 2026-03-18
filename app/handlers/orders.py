@@ -10,6 +10,8 @@ from aiogram.types import CallbackQuery, Message
 from app.config import Settings
 from app.db import Database
 from app.handlers.constants import (
+    MENU_ORDER_PRODUCTS,
+    MENU_ORDER_SUPPLIES,
     ORDER_MESSAGE_CHAT_KEY,
     ORDER_MESSAGE_ID_KEY,
     ORDER_PENDING_ITEM_KEY,
@@ -195,6 +197,7 @@ async def _start_order_checklist(
 
 
 @order_router.message(Command("order_products"))
+@order_router.message(F.text == MENU_ORDER_PRODUCTS)
 async def order_products_start(
     message: Message,
     state: FSMContext,
@@ -213,6 +216,7 @@ async def order_products_start(
 
 
 @order_router.message(Command("order_supplies"))
+@order_router.message(F.text == MENU_ORDER_SUPPLIES)
 async def order_supplies_start(
     message: Message,
     state: FSMContext,

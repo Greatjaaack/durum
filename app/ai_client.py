@@ -16,7 +16,9 @@ class OpenRouterClient:
     API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
     # Базовый промпт для генерации факта о еде.
-    FOOD_FACT_PROMPT = "Напиши короткий интересный факт о еде или кухне. 1–2 предложения."
+    FOOD_FACT_PROMPT = (
+        "Сгенерируй короткий интересный факт о еде. 1–2 предложения. Без банальностей."
+    )
 
     def __init__(
         self,

@@ -5,49 +5,85 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
 
 from app.config import Settings
+from app.units_config import parse_mixed_number
+from app.handlers.constants import (
+    MENU_BACK,
+    MENU_CLOSE_SHIFT,
+    MENU_FACT,
+    MENU_MID_SHIFT,
+    MENU_MORE,
+    MENU_OPEN_SHIFT,
+    MENU_ORDER_PRODUCTS,
+    MENU_ORDER_SUPPLIES,
+    MENU_PROBLEM,
+    MENU_STOCK,
+)
 
 
 logger = logging.getLogger(__name__)
 
 
-def build_main_menu_keyboard() -> ReplyKeyboardMarkup:
-    """Строит основную reply-клавиатуру бота.
+def build_shift_menu_keyboard(
+    *,
+    is_shift_open: bool,
+) -> ReplyKeyboardMarkup:
+    """Строит меню первого уровня в зависимости от статуса смены.
+
+    Args:
+        is_shift_open: Признак открытой смены у сотрудника.
+
+    Returns:
+        Reply-клавиатура первого уровня.
+    """
+    if is_shift_open:
+        keyboard = [
+            [
+                KeyboardButton(text=MENU_MID_SHIFT),
+                KeyboardButton(text=MENU_CLOSE_SHIFT),
+            ],
+            [KeyboardButton(text=MENU_MORE)],
+        ]
+    else:
+        keyboard = [
+            [KeyboardButton(text=MENU_OPEN_SHIFT)],
+            [KeyboardButton(text=MENU_MORE)],
+        ]
+
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard,
+        resize_keyboard=True,
+        input_field_placeholder="Выберите действие",
+    )
+
+
+def build_additional_menu_keyboard() -> ReplyKeyboardMarkup:
+    """Строит меню второго уровня «Дополнительно».
 
     Args:
         Нет параметров.
 
     Returns:
-        Готовая клавиатура главного меню.
+        Reply-клавиатура дополнительных действий.
     """
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="/open"),
-                KeyboardButton(text="/mid"),
-                KeyboardButton(text="/close"),
+                KeyboardButton(text=MENU_ORDER_PRODUCTS),
+                KeyboardButton(text=MENU_ORDER_SUPPLIES),
             ],
             [
-                KeyboardButton(text="/order_products"),
-                KeyboardButton(text="/order_supplies"),
+                KeyboardButton(text=MENU_STOCK),
+                KeyboardButton(text=MENU_PROBLEM),
             ],
-            [
-                KeyboardButton(text="/stock"),
-                KeyboardButton(text="/problem"),
-            ],
-            [
-                KeyboardButton(text="/report"),
-                KeyboardButton(text="/fact"),
-            ],
-            [
-                KeyboardButton(text="/ai"),
-                KeyboardButton(text="/stop"),
-            ],
+            [KeyboardButton(text=MENU_FACT)],
+            [KeyboardButton(text=MENU_BACK)],
         ],
         resize_keyboard=True,
-        input_field_placeholder="Выберите действие",
+        input_field_placeholder="Дополнительные действия",
     )
 
 
@@ -138,18 +174,8 @@ def parse_close_residual_value(
     if not text:
         return None
 
-    if item_key != "sauce":
-        return parse_non_negative_number(text)
-
-    if "/" in text:
-        parts = text.split("/")
-        if len(parts) != 2:
-            return None
-        numerator = parse_non_negative_number(parts[0])
-        denominator = parse_positive_number(parts[1])
-        if numerator is None or denominator is None:
-            return None
-        return numerator / denominator
+    if item_key == "sauce":
+        return parse_mixed_number(text)
 
     return parse_non_negative_number(text)
 
@@ -206,5 +232,20 @@ async def notify_work_chat(
     """
     try:
         await bot.send_message(settings.work_chat_id, text)
+    except TelegramBadRequest as error:
+        if "chat not found" in str(error).lower():
+            logger.warning(
+                "Work chat not found (work_chat_id=%s). Sending message to owner instead.",
+                settings.work_chat_id,
+            )
+            try:
+                await bot.send_message(
+                    settings.owner_id,
+                    "⚠ Рабочий чат недоступен, отправляю отчёт владельцу.\n\n" + text,
+                )
+            except Exception:
+                logger.exception("Failed to send fallback message to owner")
+            return
+        logger.exception("Failed to send message to work chat")
     except Exception:
         logger.exception("Failed to send message to work chat")

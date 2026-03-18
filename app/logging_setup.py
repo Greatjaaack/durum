@@ -4,6 +4,8 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import TextIO
+from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfoNotFoundError
 
 
 class DailyFileHandler(logging.Handler):
@@ -12,6 +14,7 @@ class DailyFileHandler(logging.Handler):
     def __init__(
         self,
         log_dir: Path,
+        timezone: str = "Europe/Moscow",
         *,
         encoding: str = "utf-8",
     ) -> None:
@@ -27,8 +30,26 @@ class DailyFileHandler(logging.Handler):
         super().__init__()
         self.log_dir = log_dir
         self.encoding = encoding
+        self.timezone = timezone
         self._current_date = ""
         self._stream: TextIO | None = None
+        try:
+            self._tzinfo = ZoneInfo(timezone)
+        except ZoneInfoNotFoundError:
+            self._tzinfo = None
+
+    def _today_text(self) -> str:
+        """Возвращает текущую дату в целевой таймзоне.
+
+        Args:
+            Нет параметров.
+
+        Returns:
+            Строка даты YYYY-MM-DD.
+        """
+        if self._tzinfo is not None:
+            return datetime.now(self._tzinfo).date().isoformat()
+        return datetime.now().date().isoformat()
 
     def _log_path_for_today(self) -> Path:
         """Возвращает путь к файлу логов за текущую дату.
@@ -39,7 +60,7 @@ class DailyFileHandler(logging.Handler):
         Returns:
             Путь к файлу лога за текущий день.
         """
-        date_text = datetime.now().date().isoformat()
+        date_text = self._today_text()
         return self.log_dir / f"app_{date_text}.log"
 
     def _ensure_stream(self) -> None:
@@ -51,7 +72,7 @@ class DailyFileHandler(logging.Handler):
         Returns:
             None.
         """
-        today = datetime.now().date().isoformat()
+        today = self._today_text()
         if self._stream is not None and self._current_date == today:
             return
 
@@ -109,8 +130,56 @@ class DailyFileHandler(logging.Handler):
         super().close()
 
 
+class TimezoneFormatter(logging.Formatter):
+    """Форматтер логов с явной таймзоной."""
+
+    def __init__(
+        self,
+        fmt: str,
+        timezone: str = "Europe/Moscow",
+    ) -> None:
+        """Инициализирует форматтер с заданной таймзоной.
+
+        Args:
+            fmt: Формат строки лога.
+            timezone: Имя таймзоны IANA.
+
+        Returns:
+            None.
+        """
+        super().__init__(fmt=fmt)
+        self.timezone = timezone
+        try:
+            self._tzinfo = ZoneInfo(timezone)
+        except ZoneInfoNotFoundError:
+            self._tzinfo = None
+
+    def formatTime(
+        self,
+        record: logging.LogRecord,
+        datefmt: str | None = None,
+    ) -> str:
+        """Форматирует время записи лога в заданной таймзоне.
+
+        Args:
+            record: Запись лога.
+            datefmt: Пользовательский формат времени.
+
+        Returns:
+            Строка времени.
+        """
+        if self._tzinfo is not None:
+            dt = datetime.fromtimestamp(record.created, tz=self._tzinfo)
+        else:
+            dt = datetime.fromtimestamp(record.created)
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.isoformat(sep=" ", timespec="seconds")
+
+
 def configure_logging(
     log_dir: str | Path = "logs",
+    timezone: str = "Europe/Moscow",
 ) -> None:
     """Настраивает консольное и файловое логирование приложения.
 
@@ -123,8 +192,9 @@ def configure_logging(
     logs_path = Path(log_dir)
     logs_path.mkdir(parents=True, exist_ok=True)
 
-    formatter = logging.Formatter(
+    formatter = TimezoneFormatter(
         fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        timezone=timezone,
     )
 
     root_logger = logging.getLogger()
@@ -135,7 +205,7 @@ def configure_logging(
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
 
-    file_handler = DailyFileHandler(logs_path)
+    file_handler = DailyFileHandler(logs_path, timezone=timezone)
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
 

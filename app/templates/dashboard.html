@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard · Durum{% endblock %}
+
+{% block content %}
+<section class="card filters">
+  <form method="get" action="/dashboard" class="filters__grid compact">
+    <label class="field">
+      <span>Дата</span>
+      <input type="date" name="date" value="{{ filters.date }}" />
+    </label>
+    <div class="filters__actions">
+      <button type="submit">Показать</button>
+      <a href="/dashboard" class="link-btn">Сбросить</a>
+    </div>
+  </form>
+</section>
+
+{% if not shifts and not residuals and not employees %}
+<section class="card empty-state">
+  <p>Нет данных за выбранный период</p>
+</section>
+{% endif %}
+
+<section class="kpi-grid compact">
+  <article class="kpi-card">
+    <div class="kpi-card__label">Смен</div>
+    <div class="kpi-card__value">{{ kpi.shifts_count }}</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-card__label">Среднее закрытие</div>
+    <div class="kpi-card__value">{{ kpi.avg_close_label }}</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-card__label">Заполнение</div>
+    <div class="kpi-card__value">{{ kpi.checklist_completion_label }}</div>
+  </article>
+</section>
+
+<section class="grid-2">
+  <article class="card">
+    <div class="card__header">
+      <h2>📊 Остатки</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Позиция</th>
+            <th>Текущее</th>
+            <th>Среднее</th>
+            <th>Δ %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if residuals %}
+          {% for row in residuals %}
+          <tr class="{% if row.is_anomaly %}warn{% endif %}">
+            <td>{{ row.item_label }}</td>
+            <td>{{ row.current_label }} {{ row.unit }}</td>
+            <td>{{ row.avg_label }} {{ row.unit }}</td>
+            <td>{{ row.deviation_label }}</td>
+          </tr>
+          {% endfor %}
+          {% else %}
+          <tr>
+            <td colspan="4">Нет данных за выбранный период</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card__header">
+      <h2>👤 Сотрудники</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Сотрудник</th>
+            <th>Смен</th>
+            <th>Ср. закрытие</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if employees %}
+          {% for row in employees %}
+          <tr>
+            <td>{{ row.employee }}</td>
+            <td>{{ row.shifts_count }}</td>
+            <td>{{ row.avg_close_label }}</td>
+          </tr>
+          {% endfor %}
+          {% else %}
+          <tr>
+            <td colspan="3">Нет данных за выбранный период</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+
+<section class="grid-2">
+  <article class="card">
+    <div class="card__header">
+      <h2>📈 Остатки по продуктам</h2>
+    </div>
+    {% if charts.residual_bar.labels %}
+    <div class="chart-wrap">
+      <canvas id="residualBarChart"></canvas>
+    </div>
+    {% else %}
+    <p class="muted">Нет данных за выбранный период</p>
+    {% endif %}
+  </article>
+  <article class="card">
+    <div class="card__header">
+      <h2>⏱ Время закрытия смен</h2>
+    </div>
+    {% if charts.close_line.labels %}
+    <div class="chart-wrap">
+      <canvas id="closeDurationChart"></canvas>
+    </div>
+    {% else %}
+    <p class="muted">Нет данных за выбранный период</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="card">
+  <div class="card__header">
+    <h2>⏱ Смены</h2>
+  </div>
+  <div class="table-wrap">
+    <table class="shifts-table">
+      <thead>
+        <tr>
+          <th class="col-id">ID</th>
+          <th>Дата</th>
+          <th>Сотрудник</th>
+          <th>Открытие</th>
+          <th>Закрытие</th>
+          <th>Длительность</th>
+          <th>Закрытие чек-листа</th>
+          <th>Статус чек-листа</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if shifts %}
+        {% for row in shifts %}
+        <tr class="{% if row.has_checklist_error %}warn{% endif %}">
+          <td class="cell-id">#{{ row.id }}</td>
+          <td class="cell-date">{{ row.date_label }}</td>
+          <td class="cell-employee">{{ row.employee }}</td>
+          <td class="cell-time">{{ row.opened_at }}</td>
+          <td class="cell-time">{{ row.closed_at }}</td>
+          <td class="cell-duration">{{ row.duration_label }}</td>
+          <td class="cell-duration">{{ row.close_duration_label }}</td>
+          <td class="checklist-status">
+            <span class="status-main">{{ row.close_status_summary }}</span>
+            {% if row.close_status_labels %}
+            <span class="status-details">{{ row.close_status_labels | join(" · ") }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+          <td colspan="8">Нет данных за выбранный период</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<script id="dashboard-charts-data" type="application/json">{{ charts | tojson }}</script>
+{% endblock %}
