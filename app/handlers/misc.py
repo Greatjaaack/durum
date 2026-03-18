@@ -11,15 +11,12 @@ from aiogram.types import Message
 from app.config import Settings
 from app.db import Database
 from app.handlers.constants import (
-    MENU_BACK,
     MENU_CANCEL,
-    MENU_MORE,
     MENU_PROBLEM,
     MENU_REPORT_BY_DATE,
 )
 from app.handlers.states import ProblemStates
 from app.handlers.utils import (
-    build_additional_menu_keyboard,
     build_shift_menu_keyboard,
     employee_name,
     notify_owner,
@@ -67,47 +64,6 @@ async def start_command(
         is_shift_open = await _is_shift_open_for_user(db, message.from_user.id)
     await message.answer(
         "Выберите действие:",
-        reply_markup=build_shift_menu_keyboard(is_shift_open=is_shift_open),
-    )
-
-
-@misc_router.message(F.text == MENU_MORE)
-async def open_additional_menu(
-    message: Message,
-) -> None:
-    """Открывает меню второго уровня «Дополнительно».
-
-    Args:
-        message: Входящее сообщение Telegram.
-
-    Returns:
-        None.
-    """
-    await message.answer(
-        "Дополнительные действия:",
-        reply_markup=build_additional_menu_keyboard(),
-    )
-
-
-@misc_router.message(F.text == MENU_BACK)
-async def back_to_main_menu(
-    message: Message,
-    db: Database,
-) -> None:
-    """Возвращает пользователя на первый уровень меню.
-
-    Args:
-        message: Входящее сообщение Telegram.
-        db: Экземпляр базы данных.
-
-    Returns:
-        None.
-    """
-    is_shift_open = False
-    if message.from_user:
-        is_shift_open = await _is_shift_open_for_user(db, message.from_user.id)
-    await message.answer(
-        "Главное меню:",
         reply_markup=build_shift_menu_keyboard(is_shift_open=is_shift_open),
     )
 

@@ -77,7 +77,6 @@ app/
   bot.py                 # Точка входа Telegram-бота
   config.py              # Загрузка и валидация настроек
   db.py                  # SQLite-слой и миграции
-  order_catalog.py       # Рендер заказов (products/supplies)
   report_builder.py      # Текстовый отчёт /report YYYY-MM-DD
   reminders.py           # Планировщик напоминаний/фактов
   ai_client.py           # OpenRouter API клиент
@@ -96,7 +95,6 @@ app/
   handlers/
     __init__.py          # Сборка всех роутеров
     shift.py             # /open, /mid, /close и чек-листы
-    orders.py            # /order_products, /order_supplies
     stock.py             # /stock
     misc.py              # /start, /cancel, /problem, /report
     reports.py           # /reports (интерактивные отчёты)
@@ -129,15 +127,13 @@ pyproject.toml
 - `/open` — открыть смену и пройти чек-лист открытия
 - `/mid` — чек-лист ведения смены
 - `/close` — чек-лист закрытия + фиксация остатков
-- `/order_products` — заказ продуктов
-- `/order_supplies` — заказ хозтоваров
 - `/stock` — ручной ввод остатков
 - `/problem` — отправка проблемы владельцу
 - `/report YYYY-MM-DD` — текстовый отчёт за дату
 - `/reports` — интерактивные отчёты (смены/остатки/чек-листы)
 - `/fact` — последний факт о еде
 - `/ai` — включить AI-режим
-- `/stop` — выключить AI-режим
+- `/stop` —  AI-режим
 - `/cancel` — сброс текущего FSM-сценария
 
 ## 6. Пример работы

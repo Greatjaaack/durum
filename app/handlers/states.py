@@ -9,12 +9,6 @@ class CloseShiftStates(StatesGroup):
     wizard = State()
 
 
-class OrderStates(StatesGroup):
-    """Состояния FSM для сценариев заказа."""
-
-    waiting_product_quantity = State()
-
-
 class StockStates(StatesGroup):
     """Состояния FSM для ввода остатков."""
 

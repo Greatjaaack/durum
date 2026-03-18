@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from app.checklist.callbacks import build_checklist_callback
 from app.checklist.data import CHECKLISTS, CHECKLIST_TITLES
 
 # Максимальная длина текста inline-кнопки Telegram.
@@ -202,6 +203,7 @@ def build_checklist_keyboard(
     checklist_type: str,
     completed: set[int],
     active_section: int,
+    shift_id: int | None = None,
 ) -> InlineKeyboardMarkup:
     """Строит inline-клавиатуру чек-листа.
 
@@ -209,6 +211,7 @@ def build_checklist_keyboard(
         checklist_type: Тип чек-листа.
         completed: Множество выполненных пунктов.
         active_section: Активная секция.
+        shift_id: Идентификатор смены для привязки callback-кнопок.
 
     Returns:
         Готовая inline-клавиатура.
@@ -222,7 +225,12 @@ def build_checklist_keyboard(
     for local_index, item in enumerate(active_items):
         item_index = start_index + local_index
         mark = "☑" if item_index in completed else "☐"
-        item_callback = f"checklist:{checklist_type}:item:{item_index}"
+        item_callback = build_checklist_callback(
+            checklist_type=checklist_type,
+            action="item",
+            value=item_index,
+            shift_id=shift_id,
+        )
         rows.append(
             [
                 InlineKeyboardButton(
@@ -234,17 +242,29 @@ def build_checklist_keyboard(
 
     nav_row: list[InlineKeyboardButton] = []
     if active_section > 0:
+        back_callback = build_checklist_callback(
+            checklist_type=checklist_type,
+            action="section",
+            value=active_section - 1,
+            shift_id=shift_id,
+        )
         nav_row.append(
             InlineKeyboardButton(
                 text="← Назад",
-                callback_data=f"checklist:{checklist_type}:section:{active_section - 1}",
+                callback_data=back_callback,
             )
         )
     if active_section < len(sections) - 1:
+        next_callback = build_checklist_callback(
+            checklist_type=checklist_type,
+            action="section",
+            value=active_section + 1,
+            shift_id=shift_id,
+        )
         nav_row.append(
             InlineKeyboardButton(
                 text="➡",
-                callback_data=f"checklist:{checklist_type}:section:{active_section + 1}",
+                callback_data=next_callback,
             )
         )
     if nav_row:

@@ -11,6 +11,7 @@ from app.checklist.data import CLOSE_RESIDUAL_INPUTS
 from app.checklist.ui import checklist_total_items
 from app.db import Database
 from app.handlers.constants import MENU_REPORTS
+from app.handlers.utils import safe_edit_text
 
 
 report_router = Router()
@@ -287,9 +288,11 @@ async def reports_types_callback(
     if not callback.message:
         await callback.answer()
         return
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         "Выберите тип отчёта:",
         reply_markup=_build_report_types_keyboard(),
+        log_context="reports types",
     )
     await callback.answer()
 
@@ -319,20 +322,24 @@ async def reports_type_callback(
 
     dates = await db.get_shift_dates(limit=14)
     if not dates:
-        await callback.message.edit_text(
+        await safe_edit_text(
+            callback.message,
             "Нет данных по сменам.",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="⬅️ К типам отчётов", callback_data="reports:types")]
                 ]
             ),
+            log_context="reports type",
         )
         await callback.answer()
         return
 
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         f"{REPORT_TYPES[report_type]}\nВыберите дату:",
         reply_markup=_build_dates_keyboard(report_type, dates),
+        log_context="reports type",
     )
     await callback.answer()
 
@@ -368,7 +375,8 @@ async def reports_date_callback(
     if report_type == "shifts":
         shifts = await db.get_shifts_by_date(report_date)
         if not shifts:
-            await callback.message.edit_text(
+            await safe_edit_text(
+                callback.message,
                 f"Смены за {_date_label(report_date)} не найдены.",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[
@@ -386,13 +394,16 @@ async def reports_date_callback(
                         ],
                     ]
                 ),
+                log_context="reports shifts by date",
             )
             await callback.answer()
             return
 
-        await callback.message.edit_text(
+        await safe_edit_text(
+            callback.message,
             f"📅 Смены за {_date_label(report_date)}\nВыберите смену:",
             reply_markup=_build_shifts_keyboard(report_date, shifts),
+            log_context="reports shifts by date",
         )
         await callback.answer()
         return
@@ -415,7 +426,8 @@ async def reports_date_callback(
         else:
             lines.append("Нет данных по остаткам.")
 
-        await callback.message.edit_text(
+        await safe_edit_text(
+            callback.message,
             "\n".join(lines),
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -423,6 +435,7 @@ async def reports_date_callback(
                     [InlineKeyboardButton(text="⬅️ К типам отчётов", callback_data="reports:types")],
                 ]
             ),
+            log_context="reports residuals",
         )
         await callback.answer()
         return
@@ -447,7 +460,8 @@ async def reports_date_callback(
         if lines[-1] == "":
             lines.pop()
 
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         "\n".join(lines),
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
@@ -455,6 +469,7 @@ async def reports_date_callback(
                 [InlineKeyboardButton(text="⬅️ К типам отчётов", callback_data="reports:types")],
             ]
         ),
+        log_context="reports checklists",
     )
     await callback.answer()
 
@@ -490,7 +505,8 @@ async def reports_shift_callback(
         return
 
     detail_text = await _build_shift_detail_text(db, shift_id)
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         detail_text,
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
@@ -508,5 +524,6 @@ async def reports_shift_callback(
                 ],
             ]
         ),
+        log_context="reports shift details",
     )
     await callback.answer()

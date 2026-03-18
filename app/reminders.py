@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
@@ -32,26 +32,34 @@ PRODUCT_ORDER_REMINDER_HOUR = 19
 # Минута ежедневной проверки заказа продукции.
 PRODUCT_ORDER_REMINDER_MINUTE = 0
 
-# Час дедлайна открытия смены для уведомления владельца.
-OPENING_DEADLINE_HOUR = 10
+# Смещение (в минутах) для дедлайна открытия смены относительно времени старта.
+OPENING_DEADLINE_OFFSET_MIN = -60
 
-# Минута дедлайна открытия смены для уведомления владельца.
-OPENING_DEADLINE_MINUTE = 0
+# Смещение (в минутах) для первого напоминания после времени закрытия смены.
+CLOSE_CHECKLIST_FIRST_REMINDER_OFFSET_MIN = 90
 
-# Форматированная подпись дедлайна открытия смены.
-OPENING_DEADLINE_LABEL = f"{OPENING_DEADLINE_HOUR:02d}:{OPENING_DEADLINE_MINUTE:02d}"
+# Смещение (в минутах) для второго напоминания после времени закрытия смены.
+CLOSE_CHECKLIST_SECOND_REMINDER_OFFSET_MIN = 105
 
-# Час первого напоминания о незавершённом закрытии.
-CLOSE_CHECKLIST_FIRST_REMINDER_HOUR = 23
 
-# Минута первого напоминания о незавершённом закрытии.
-CLOSE_CHECKLIST_FIRST_REMINDER_MINUTE = 30
+def _time_with_offset(
+    base_time: time,
+    *,
+    offset_minutes: int,
+) -> tuple[int, int]:
+    """Считает часы и минуты для cron-триггера со смещением от базового времени.
 
-# Час второго напоминания о незавершённом закрытии.
-CLOSE_CHECKLIST_SECOND_REMINDER_HOUR = 23
+    Args:
+        base_time: Базовое время.
+        offset_minutes: Смещение в минутах.
 
-# Минута второго напоминания о незавершённом закрытии.
-CLOSE_CHECKLIST_SECOND_REMINDER_MINUTE = 45
+    Returns:
+        Кортеж (hour, minute).
+    """
+    anchor = datetime.combine(datetime.now().date(), base_time)
+    shifted = anchor + timedelta(minutes=offset_minutes)
+    return shifted.hour, shifted.minute
+
 
 def setup_scheduler(
     bot: Bot,
@@ -71,6 +79,19 @@ def setup_scheduler(
     timezone = ZoneInfo(settings.timezone)
     scheduler = AsyncIOScheduler(timezone=timezone)
     close_total_items = checklist_total_items("close")
+    opening_deadline_hour, opening_deadline_minute = _time_with_offset(
+        settings.shift_open_time,
+        offset_minutes=OPENING_DEADLINE_OFFSET_MIN,
+    )
+    opening_deadline_label = f"{opening_deadline_hour:02d}:{opening_deadline_minute:02d}"
+    close_first_hour, close_first_minute = _time_with_offset(
+        settings.shift_close_time,
+        offset_minutes=CLOSE_CHECKLIST_FIRST_REMINDER_OFFSET_MIN,
+    )
+    close_second_hour, close_second_minute = _time_with_offset(
+        settings.shift_close_time,
+        offset_minutes=CLOSE_CHECKLIST_SECOND_REMINDER_OFFSET_MIN,
+    )
 
     async def _send_to_active_employees(text: str) -> None:
         """Отправляет уведомление всем сотрудникам с открытой сменой.
@@ -111,7 +132,7 @@ def setup_scheduler(
         await _send_to_active_employees(PRODUCT_ORDER_REMINDER_TEXT)
 
     async def notify_if_shift_not_opened() -> None:
-        """Уведомляет владельца, если смена не открыта к 10:00.
+        """Уведомляет владельца, если смена не открыта к дедлайну старта.
 
         Args:
             Нет параметров.
@@ -126,7 +147,7 @@ def setup_scheduler(
         try:
             await bot.send_message(
                 settings.owner_id,
-                f"Смена не открыта до {OPENING_DEADLINE_LABEL} ({shift_date}).",
+                f"Смена не открыта до {opening_deadline_label} ({shift_date}).",
             )
         except Exception:
             logger.exception("Failed to notify owner about unopened shift")
@@ -198,8 +219,8 @@ def setup_scheduler(
     scheduler.add_job(
         notify_if_shift_not_opened,
         trigger=CronTrigger(
-            hour=OPENING_DEADLINE_HOUR,
-            minute=OPENING_DEADLINE_MINUTE,
+            hour=opening_deadline_hour,
+            minute=opening_deadline_minute,
             timezone=timezone,
         ),
         id="opening_deadline_check",
@@ -208,21 +229,21 @@ def setup_scheduler(
     scheduler.add_job(
         remind_incomplete_close_checklist,
         trigger=CronTrigger(
-            hour=CLOSE_CHECKLIST_FIRST_REMINDER_HOUR,
-            minute=CLOSE_CHECKLIST_FIRST_REMINDER_MINUTE,
+            hour=close_first_hour,
+            minute=close_first_minute,
             timezone=timezone,
         ),
-        id="close_checklist_reminder_2330",
+        id="close_checklist_reminder_first",
         replace_existing=True,
     )
     scheduler.add_job(
         remind_incomplete_close_checklist,
         trigger=CronTrigger(
-            hour=CLOSE_CHECKLIST_SECOND_REMINDER_HOUR,
-            minute=CLOSE_CHECKLIST_SECOND_REMINDER_MINUTE,
+            hour=close_second_hour,
+            minute=close_second_minute,
             timezone=timezone,
         ),
-        id="close_checklist_reminder_2345",
+        id="close_checklist_reminder_second",
         replace_existing=True,
     )
     return scheduler

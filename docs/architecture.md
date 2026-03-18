@@ -126,7 +126,6 @@ HTML-страница:
 app/handlers/*   -> транспортный слой (команды, callback, FSM)
 app/db.py        -> data access + миграции
 app/checklist/*  -> YAML-конфиг + UI-рендер чек-листов
-app/order_catalog.py -> UI-рендер заказов
 app/report_builder.py -> текстовый отчёт по дате
 app/reminders.py -> фоновые задачи
 app/dashboard/*  -> веб-представление отчётов/смен

@@ -7,6 +7,14 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from app.db_schema import (
+    ensure_close_residual_columns as ensure_close_residual_schema_columns,
+    ensure_shift_audit_columns as ensure_shift_audit_schema_columns,
+    ensure_shift_status_column as ensure_shift_status_schema_column,
+    ensure_shift_status_index as ensure_shift_status_schema_index,
+)
+
+
 class Database:
     def __init__(self, db_path: str | Path) -> None:
         """Создаёт подключение к SQLite и инициализирует блокировку.
@@ -89,19 +97,7 @@ class Database:
             None.
         """
         with self._lock:
-            rows = self._conn.execute("PRAGMA table_info(shifts)").fetchall()
-            columns = {str(row["name"]) for row in rows}
-            if "status" not in columns:
-                self._conn.execute(
-                    "ALTER TABLE shifts ADD COLUMN status TEXT NOT NULL DEFAULT 'OPEN'"
-                )
-            self._conn.execute(
-                """
-                UPDATE shifts
-                SET status = CASE WHEN close_time IS NULL THEN 'OPEN' ELSE 'CLOSED' END
-                """
-            )
-            self._conn.commit()
+            ensure_shift_status_schema_column(self._conn)
 
     def _ensure_shift_audit_columns(self) -> None:
         """Проверяет и синхронизирует колонки аудита открытия/закрытия смены.
@@ -113,59 +109,7 @@ class Database:
             None.
         """
         with self._lock:
-            rows = self._conn.execute("PRAGMA table_info(shifts)").fetchall()
-            columns = {str(row["name"]) for row in rows}
-            if "opened_at" not in columns:
-                self._conn.execute("ALTER TABLE shifts ADD COLUMN opened_at TEXT")
-            if "closed_at" not in columns:
-                self._conn.execute("ALTER TABLE shifts ADD COLUMN closed_at TEXT")
-            if "opened_by" not in columns:
-                self._conn.execute("ALTER TABLE shifts ADD COLUMN opened_by TEXT")
-            if "close_started_at" not in columns:
-                self._conn.execute("ALTER TABLE shifts ADD COLUMN close_started_at TEXT")
-            if "closed_by_id" not in columns:
-                self._conn.execute("ALTER TABLE shifts ADD COLUMN closed_by_id INTEGER")
-            if "closed_by_name" not in columns:
-                self._conn.execute("ALTER TABLE shifts ADD COLUMN closed_by_name TEXT")
-            if "close_duration_sec" not in columns:
-                self._conn.execute("ALTER TABLE shifts ADD COLUMN close_duration_sec INTEGER")
-
-            self._conn.execute(
-                """
-                UPDATE shifts
-                SET opened_at = COALESCE(NULLIF(opened_at, ''), open_time)
-                WHERE opened_at IS NULL OR opened_at = ''
-                """
-            )
-            self._conn.execute(
-                """
-                UPDATE shifts
-                SET closed_at = COALESCE(NULLIF(closed_at, ''), close_time)
-                WHERE close_time IS NOT NULL AND (closed_at IS NULL OR closed_at = '')
-                """
-            )
-            self._conn.execute(
-                """
-                UPDATE shifts
-                SET opened_by = COALESCE(NULLIF(opened_by, ''), employee)
-                WHERE opened_by IS NULL OR opened_by = ''
-                """
-            )
-            self._conn.execute(
-                """
-                UPDATE shifts
-                SET closed_by_name = COALESCE(NULLIF(closed_by_name, ''), employee)
-                WHERE close_time IS NOT NULL AND (closed_by_name IS NULL OR closed_by_name = '')
-                """
-            )
-            self._conn.execute(
-                """
-                UPDATE shifts
-                SET close_started_at = COALESCE(NULLIF(close_started_at, ''), close_time, open_time)
-                WHERE close_time IS NOT NULL AND (close_started_at IS NULL OR close_started_at = '')
-                """
-            )
-            self._conn.commit()
+            ensure_shift_audit_schema_columns(self._conn)
 
     def _ensure_close_residual_columns(self) -> None:
         """Проверяет и синхронизирует поля нормализации остатков закрытия.
@@ -177,104 +121,19 @@ class Database:
             None.
         """
         with self._lock:
-            rows = self._conn.execute("PRAGMA table_info(close_residuals)").fetchall()
-            if not rows:
-                return
+            ensure_close_residual_schema_columns(self._conn)
 
-            columns = {str(row["name"]) for row in rows}
-            if "input_value" not in columns:
-                self._conn.execute("ALTER TABLE close_residuals ADD COLUMN input_value REAL")
-            if "unit_type" not in columns:
-                self._conn.execute("ALTER TABLE close_residuals ADD COLUMN unit_type TEXT")
-            if "normalized_quantity" not in columns:
-                self._conn.execute("ALTER TABLE close_residuals ADD COLUMN normalized_quantity REAL")
-            if "normalized_unit" not in columns:
-                self._conn.execute("ALTER TABLE close_residuals ADD COLUMN normalized_unit TEXT")
+    def _ensure_shift_status_index(self) -> None:
+        """Создаёт индекс статуса смены, если он отсутствует.
 
-            self._conn.execute(
-                """
-                UPDATE close_residuals
-                SET input_value = COALESCE(input_value, quantity)
-                WHERE input_value IS NULL
-                """
-            )
-            self._conn.execute(
-                """
-                UPDATE close_residuals
-                SET normalized_quantity = COALESCE(normalized_quantity, quantity)
-                WHERE normalized_quantity IS NULL
-                """
-            )
-            self._conn.execute(
-                """
-                UPDATE close_residuals
-                SET normalized_unit = COALESCE(NULLIF(normalized_unit, ''), unit)
-                WHERE normalized_unit IS NULL OR normalized_unit = ''
-                """
-            )
-            self._conn.execute(
-                """
-                UPDATE close_residuals
-                SET unit_type = COALESCE(NULLIF(unit_type, ''), 'legacy')
-                WHERE unit_type IS NULL OR unit_type = ''
-                """
-            )
+        Args:
+            Нет параметров.
 
-            # Конвертация legacy-данных в нормализованный формат.
-            self._conn.execute(
-                """
-                UPDATE close_residuals
-                SET
-                    unit_type = 'weight_g',
-                    input_value = CASE
-                        WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity * 1000.0
-                        ELSE quantity
-                    END,
-                    normalized_quantity = CASE
-                        WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity * 1000.0
-                        ELSE quantity
-                    END,
-                    normalized_unit = 'г'
-                WHERE unit_type = 'legacy' AND item_key IN ('marinated_chicken', 'fried_chicken')
-                """
-            )
-            self._conn.execute(
-                """
-                UPDATE close_residuals
-                SET
-                    unit_type = 'piece',
-                    input_value = quantity,
-                    normalized_quantity = quantity,
-                    normalized_unit = 'шт'
-                WHERE unit_type = 'legacy' AND item_key = 'lavash'
-                """
-            )
-            self._conn.execute(
-                """
-                UPDATE close_residuals
-                SET
-                    unit_type = 'portion',
-                    input_value = quantity,
-                    normalized_quantity = quantity,
-                    normalized_unit = 'порц'
-                WHERE unit_type = 'legacy' AND item_key = 'soup'
-                """
-            )
-            self._conn.execute(
-                """
-                UPDATE close_residuals
-                SET
-                    unit_type = CASE
-                        WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml') THEN 'legacy_ml'
-                        ELSE 'gastro_unit'
-                    END,
-                    input_value = quantity,
-                    normalized_quantity = quantity,
-                    normalized_unit = COALESCE(NULLIF(unit, ''), 'гастроёмк')
-                WHERE unit_type = 'legacy' AND item_key = 'sauce'
-                """
-            )
-            self._conn.commit()
+        Returns:
+            None.
+        """
+        with self._lock:
+            ensure_shift_status_schema_index(self._conn)
 
     async def init(self) -> None:
         """Инициализирует схему базы данных и миграции.
@@ -383,10 +242,7 @@ class Database:
         await asyncio.to_thread(self._ensure_shift_status_column)
         await asyncio.to_thread(self._ensure_shift_audit_columns)
         await asyncio.to_thread(self._ensure_close_residual_columns)
-        await asyncio.to_thread(
-            self._execute_script,
-            "CREATE INDEX IF NOT EXISTS idx_shifts_status ON shifts(status);",
-        )
+        await asyncio.to_thread(self._ensure_shift_status_index)
 
     async def create_shift(
         self,

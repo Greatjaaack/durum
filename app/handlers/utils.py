@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -11,16 +12,9 @@ from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
 from app.config import Settings
 from app.units_config import parse_mixed_number
 from app.handlers.constants import (
-    MENU_BACK,
     MENU_CLOSE_SHIFT,
-    MENU_FACT,
     MENU_MID_SHIFT,
-    MENU_MORE,
     MENU_OPEN_SHIFT,
-    MENU_ORDER_PRODUCTS,
-    MENU_ORDER_SUPPLIES,
-    MENU_PROBLEM,
-    MENU_STOCK,
 )
 
 
@@ -45,45 +39,16 @@ def build_shift_menu_keyboard(
                 KeyboardButton(text=MENU_MID_SHIFT),
                 KeyboardButton(text=MENU_CLOSE_SHIFT),
             ],
-            [KeyboardButton(text=MENU_MORE)],
         ]
     else:
         keyboard = [
             [KeyboardButton(text=MENU_OPEN_SHIFT)],
-            [KeyboardButton(text=MENU_MORE)],
         ]
 
     return ReplyKeyboardMarkup(
         keyboard=keyboard,
         resize_keyboard=True,
         input_field_placeholder="Выберите действие",
-    )
-
-
-def build_additional_menu_keyboard() -> ReplyKeyboardMarkup:
-    """Строит меню второго уровня «Дополнительно».
-
-    Args:
-        Нет параметров.
-
-    Returns:
-        Reply-клавиатура дополнительных действий.
-    """
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text=MENU_ORDER_PRODUCTS),
-                KeyboardButton(text=MENU_ORDER_SUPPLIES),
-            ],
-            [
-                KeyboardButton(text=MENU_STOCK),
-                KeyboardButton(text=MENU_PROBLEM),
-            ],
-            [KeyboardButton(text=MENU_FACT)],
-            [KeyboardButton(text=MENU_BACK)],
-        ],
-        resize_keyboard=True,
-        input_field_placeholder="Дополнительные действия",
     )
 
 
@@ -135,7 +100,7 @@ def parse_non_negative_number(
         value = float(raw.replace(",", ".").strip())
     except ValueError:
         return None
-    if value < 0:
+    if not math.isfinite(value) or value < 0:
         return None
     return value
 
@@ -192,6 +157,66 @@ def fmt_number(
         Отформатированная строка.
     """
     return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+async def safe_edit_text(
+    message: Message,
+    text: str,
+    reply_markup: object | None = None,
+    *,
+    log_context: str = "message",
+) -> None:
+    """Безопасно редактирует сообщение Telegram.
+
+    Игнорирует ошибку Telegram `message is not modified` для повторных кликов.
+
+    Args:
+        message: Сообщение для редактирования.
+        text: Новый текст.
+        reply_markup: Inline-клавиатура или None.
+        log_context: Короткая метка контекста для лога.
+
+    Returns:
+        None.
+    """
+    try:
+        await message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest as error:
+        if "message is not modified" in str(error).lower():
+            logger.info("Skipped %s edit: no changes", log_context)
+            return
+        raise
+
+
+async def safe_delete_message(
+    message: Message,
+    *,
+    log_context: str = "message",
+) -> None:
+    """Пытается удалить сообщение, не прерывая сценарий при ошибках Telegram.
+
+    Args:
+        message: Сообщение для удаления.
+        log_context: Короткая метка контекста для лога.
+
+    Returns:
+        None.
+    """
+    try:
+        await message.delete()
+    except TelegramBadRequest as error:
+        lowered = str(error).lower()
+        if (
+            "message to delete not found" in lowered
+            or "message can't be deleted" in lowered
+            or "message cannot be deleted" in lowered
+            or "not enough rights" in lowered
+        ):
+            logger.info("Skipped %s delete: %s", log_context, error)
+            return
+        raise
+    except Exception:
+        logger.exception("Failed to delete %s", log_context)
 
 
 async def notify_owner(

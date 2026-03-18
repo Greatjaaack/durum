@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 
 # Базовая единица нормализации для каждого unit_type.
@@ -60,7 +61,12 @@ def parse_mixed_number(raw_value: str) -> float | None:
                 denominator = float(denominator_text)
             except ValueError:
                 return None
-            if numerator < 0 or denominator <= 0:
+            if (
+                not math.isfinite(numerator)
+                or not math.isfinite(denominator)
+                or numerator < 0
+                or denominator <= 0
+            ):
                 return None
             total += numerator / denominator
         else:
@@ -68,9 +74,11 @@ def parse_mixed_number(raw_value: str) -> float | None:
                 value = float(term)
             except ValueError:
                 return None
-            if value < 0:
+            if not math.isfinite(value) or value < 0:
                 return None
             total += value
+    if not math.isfinite(total):
+        return None
     return total
 
 
@@ -87,7 +95,7 @@ def normalize_measurement_value(
     Returns:
         Нормализованное значение или None.
     """
-    if value < 0:
+    if not math.isfinite(value) or value < 0:
         return None
 
     normalized_unit = UNIT_TYPE_BASE_UNITS.get(unit_type)
@@ -115,7 +123,7 @@ def restore_measurement_value(
     Returns:
         Значение в интерфейсной единице или None.
     """
-    if normalized_value < 0:
+    if not math.isfinite(normalized_value) or normalized_value < 0:
         return None
 
     if unit_type in UNIT_TYPE_BASE_UNITS:

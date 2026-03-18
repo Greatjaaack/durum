@@ -27,15 +27,13 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="open", description="Открыть смену"),
         BotCommand(command="mid", description="Чек-лист ведения смены"),
         BotCommand(command="close", description="Закрыть смену"),
-        BotCommand(command="order_products", description="Заказ продукции"),
-        BotCommand(command="order_supplies", description="Заказ хозтоваров"),
         BotCommand(command="stock", description="Ввод остатков"),
         BotCommand(command="problem", description="Сообщение о проблеме"),
         BotCommand(command="report", description="Отчёт за дату"),
         BotCommand(command="reports", description="Интерактивные отчёты"),
         BotCommand(command="fact", description="Последний факт о еде"),
         BotCommand(command="ai", description="Включить AI режим"),
-        BotCommand(command="stop", description="Выключить AI режим"),
+        BotCommand(command="stop", description=" AI режим"),
         BotCommand(command="cancel", description="Отменить текущее действие"),
     ]
     await bot.set_my_commands(commands)
