@@ -10,8 +10,7 @@ from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.dashboard_service import DashboardFilters, build_dashboard_payload
-from app.units_config import UNITS_CONFIG
+from app.dashboard.service import DashboardFilters, build_dashboard_payload
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -223,24 +222,15 @@ def _ensure_close_residual_columns(
         """
         UPDATE close_residuals
         SET
-            unit_type = 'sauce_gastro',
-            input_value = CASE
-                WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml')
-                    THEN quantity / ?
-                ELSE quantity
+            unit_type = CASE
+                WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml') THEN 'legacy_ml'
+                ELSE 'gastro_unit'
             END,
-            normalized_quantity = CASE
-                WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml')
-                    THEN quantity
-                ELSE quantity * ?
-            END,
-            normalized_unit = 'мл'
+            input_value = quantity,
+            normalized_quantity = quantity,
+            normalized_unit = COALESCE(NULLIF(unit, ''), 'гастроёмк')
         WHERE unit_type = 'legacy' AND item_key = 'sauce'
-        """,
-        (
-            UNITS_CONFIG["sauce_gastro"],
-            UNITS_CONFIG["sauce_gastro"],
-        ),
+        """
     )
     conn.commit()
 

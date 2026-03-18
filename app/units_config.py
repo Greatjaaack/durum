@@ -3,27 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-# Объёмы/вес одной условной единицы хранения.
-# Для гастроёмкостей и тубусов значение задаётся в базовой единице продукта.
-UNITS_CONFIG: dict[str, float] = {
-    "sauce_gastro": 800.0,  # мл
-    "tomato_gastro": 1200.0,  # г
-    "cucumber_gastro": 1000.0,  # г
-    "meat_gastro": 2000.0,  # г
-    "tube": 500.0,  # г
-}
-
 # Базовая единица нормализации для каждого unit_type.
 UNIT_TYPE_BASE_UNITS: dict[str, str] = {
     "weight_g": "г",
     "piece": "шт",
     "portion": "порц",
-    "sauce_gastro": "мл",
     "gastro_unit": "гастроёмк",
-    "tomato_gastro": "г",
-    "cucumber_gastro": "г",
-    "meat_gastro": "г",
-    "tube": "г",
+    "sauce_gastro": "гастроёмк",
+    "legacy_ml": "мл",
 }
 
 
@@ -107,15 +94,10 @@ def normalize_measurement_value(
     if not normalized_unit:
         return None
 
-    if unit_type in UNITS_CONFIG:
-        normalized = value * UNITS_CONFIG[unit_type]
-    else:
-        normalized = value
-
     return NormalizedMeasurement(
         value=value,
         unit_type=unit_type,
-        normalized=normalized,
+        normalized=value,
         normalized_unit=normalized_unit,
     )
 
@@ -136,11 +118,6 @@ def restore_measurement_value(
     if normalized_value < 0:
         return None
 
-    if unit_type in UNITS_CONFIG:
-        unit_volume = UNITS_CONFIG[unit_type]
-        if unit_volume <= 0:
-            return None
-        return normalized_value / unit_volume
     if unit_type in UNIT_TYPE_BASE_UNITS:
         return normalized_value
     return None

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.checklist_data import CLOSE_RESIDUAL_INPUTS
+from app.checklist.data import CLOSE_RESIDUAL_INPUTS, CLOSE_RESIDUAL_LABELS_BY_KEY
 
 # Эталонные уровни остатков для ключевых позиций склада.
 STOCK_REFERENCE_LEVELS = {
@@ -13,19 +13,13 @@ STOCK_REFERENCE_LEVELS = {
 STOCK_ALERT_THRESHOLD = 0.30
 
 # Обязательные ключи остатков, без которых закрытие смены блокируется.
-CLOSE_REQUIRED_RESIDUAL_KEYS = (
-    "marinated_chicken",
-    "fried_chicken",
-    "lavash",
-    "fried_lavash",
-    "soup",
-    "sauce",
+CLOSE_REQUIRED_RESIDUAL_KEYS = tuple(
+    str(config["key"])
+    for config in CLOSE_RESIDUAL_INPUTS.values()
 )
 
 # Отображаемые подписи обязательных остатков по их внутреннему ключу.
-CLOSE_RESIDUAL_LABELS = {
-    config["key"]: item_label for item_label, config in CLOSE_RESIDUAL_INPUTS.items()
-}
+CLOSE_RESIDUAL_LABELS = dict(CLOSE_RESIDUAL_LABELS_BY_KEY)
 
 # Ключ FSM-данных: временно выбранный пункт заказа для ввода количества.
 ORDER_PENDING_ITEM_KEY = "order_pending_item"

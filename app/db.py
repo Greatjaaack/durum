@@ -7,9 +7,6 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from app.units_config import UNITS_CONFIG
-
-
 class Database:
     def __init__(self, db_path: str | Path) -> None:
         """Создаёт подключение к SQLite и инициализирует блокировку.
@@ -267,24 +264,15 @@ class Database:
                 """
                 UPDATE close_residuals
                 SET
-                    unit_type = 'sauce_gastro',
-                    input_value = CASE
-                        WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml')
-                            THEN quantity / ?
-                        ELSE quantity
+                    unit_type = CASE
+                        WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml') THEN 'legacy_ml'
+                        ELSE 'gastro_unit'
                     END,
-                    normalized_quantity = CASE
-                        WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml')
-                            THEN quantity
-                        ELSE quantity * ?
-                    END,
-                    normalized_unit = 'мл'
+                    input_value = quantity,
+                    normalized_quantity = quantity,
+                    normalized_unit = COALESCE(NULLIF(unit, ''), 'гастроёмк')
                 WHERE unit_type = 'legacy' AND item_key = 'sauce'
-                """,
-                (
-                    UNITS_CONFIG["sauce_gastro"],
-                    UNITS_CONFIG["sauce_gastro"],
-                ),
+                """
             )
             self._conn.commit()
 
@@ -1053,6 +1041,33 @@ class Database:
         """
         rows = await asyncio.to_thread(self._fetchall, query, (stock_date,))
         return {row["item"]: float(row["quantity"]) for row in rows}
+
+    async def get_latest_stock_item_quantity(self, item: str) -> float | None:
+        """Возвращает последнее сохранённое количество по позиции склада.
+
+        Args:
+            item: Наименование позиции.
+
+        Returns:
+            Последнее количество либо None, если данных нет.
+        """
+        query = """
+        SELECT quantity
+        FROM stock
+        WHERE item = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """
+        row = await asyncio.to_thread(self._fetchone, query, (item,))
+        if not row:
+            return None
+        value = row.get("quantity")
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     async def save_food_fact(self, *, fact: str, created_at: str) -> int:
         """Сохраняет факт о еде.

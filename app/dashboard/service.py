@@ -6,9 +6,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from statistics import mean
 
-from app.checklist_data import CLOSE_CHECKLIST
-from app.checklists import checklist_total_items
-from app.close_wizard import SECTION_META_BY_TITLE
+from app.checklist.data import (
+    CLOSE_CHECKLIST,
+    CLOSE_RESIDUAL_LABELS_BY_KEY,
+    CLOSE_RESIDUAL_UNITS_BY_KEY,
+    CLOSE_SECTION_EMOJI_BY_TITLE,
+)
+from app.checklist.ui import checklist_total_items
 
 
 # Максимальное количество строк смен на экране.
@@ -18,21 +22,8 @@ DASHBOARD_SHIFTS_LIMIT = 250
 ANOMALY_UPPER_FACTOR = 1.5
 ANOMALY_LOWER_FACTOR = 0.5
 
-RESIDUAL_LABELS = {
-    "marinated_chicken": "Маринованная курица",
-    "fried_chicken": "Жареная курица",
-    "lavash": "Лаваш",
-    "soup": "Суп",
-    "sauce": "Соус",
-}
-
-RESIDUAL_UNITS = {
-    "marinated_chicken": "г",
-    "fried_chicken": "г",
-    "lavash": "шт",
-    "soup": "порц",
-    "sauce": "мл",
-}
+RESIDUAL_LABELS = dict(CLOSE_RESIDUAL_LABELS_BY_KEY)
+RESIDUAL_UNITS = dict(CLOSE_RESIDUAL_UNITS_BY_KEY)
 
 # Префиксы в старых человекочитаемых названиях остатков.
 RESIDUAL_LABEL_PREFIXES = (
@@ -41,6 +32,7 @@ RESIDUAL_LABEL_PREFIXES = (
 )
 
 CHECKLIST_SECTION_SHORT_TITLES = {
+    "Передача заготовок на следующую смену": "Передача",
     "Остатки продуктов": "Остатки",
     "Продукты": "Продукты",
     "Рабочая зона": "Рабочая зона",
@@ -297,11 +289,11 @@ def _close_checklist_sections() -> list[dict[str, object]]:
     for section in CLOSE_CHECKLIST:
         title = str(section["title"]).strip()
         count = len(section["items"])
-        meta = SECTION_META_BY_TITLE.get(title)
+        emoji = CLOSE_SECTION_EMOJI_BY_TITLE.get(title, "▫️")
         sections.append(
             {
                 "title": title,
-                "emoji": meta.emoji if meta else "▫️",
+                "emoji": emoji,
                 "start": cursor,
                 "end": cursor + count - 1,
                 "total": count,

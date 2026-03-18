@@ -125,9 +125,9 @@ HTML-страница:
 ```text
 app/handlers/*   -> транспортный слой (команды, callback, FSM)
 app/db.py        -> data access + миграции
-app/checklists.py-> UI-рендер чек-листов
-app/orders.py    -> UI-рендер заказов
-app/reports.py   -> текстовый отчёт по дате
+app/checklist/*  -> YAML-конфиг + UI-рендер чек-листов
+app/order_catalog.py -> UI-рендер заказов
+app/report_builder.py -> текстовый отчёт по дате
 app/reminders.py -> фоновые задачи
-app/dashboard.py -> веб-представление отчётов/смен
+app/dashboard/*  -> веб-представление отчётов/смен
 ```

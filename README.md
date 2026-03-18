@@ -77,18 +77,22 @@ app/
   bot.py                 # Точка входа Telegram-бота
   config.py              # Загрузка и валидация настроек
   db.py                  # SQLite-слой и миграции
-  checklist_data.py      # Данные чек-листов
-  checklists.py          # Рендер текста/клавиатур чек-листов
-  orders.py              # Рендер заказов (products/supplies)
-  reports.py             # Текстовый отчёт /report YYYY-MM-DD
+  order_catalog.py       # Рендер заказов (products/supplies)
+  report_builder.py      # Текстовый отчёт /report YYYY-MM-DD
   reminders.py           # Планировщик напоминаний/фактов
   ai_client.py           # OpenRouter API клиент
   logging_setup.py       # Логирование в daily-файлы
-  dashboard.py           # FastAPI роуты и рендер dashboard
-  dashboard_service.py   # Агрегация KPI/аномалий/аналитики для dashboard
-  units_config.py        # Конфигурация единиц (гастро/тубусы) и нормализация
-  templates/             # Jinja2-шаблоны (base/dashboard)
-  static/                # CSS и JS дашборда
+  units_config.py        # Базовые единицы измерения и нормализация
+  checklist/
+    config.yaml          # YAML-конфиг чек-листов и остатков
+    data.py              # Загрузка/валидация checklist-конфига
+    ui.py                # Рендер текста/клавиатур чек-листов
+  dashboard/
+    __init__.py          # Экспорт FastAPI app для uvicorn app.dashboard:app
+    web.py               # FastAPI роуты и миграции для dashboard
+    service.py           # Агрегация KPI/аномалий/аналитики
+    templates/           # Jinja2-шаблоны (base/dashboard)
+    static/              # CSS и JS дашборда
   handlers/
     __init__.py          # Сборка всех роутеров
     shift.py             # /open, /mid, /close и чек-листы
@@ -115,6 +119,7 @@ pyproject.toml
 - APScheduler
 - FastAPI + Uvicorn
 - Jinja2 Templates
+- PyYAML
 - Chart.js
 - Poetry
 - Docker / Docker Compose

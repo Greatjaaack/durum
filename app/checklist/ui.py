@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.checklist_data import CHECKLISTS, CHECKLIST_TITLES
+from app.checklist.data import CHECKLISTS, CHECKLIST_TITLES
 
 # Максимальная длина текста inline-кнопки Telegram.
 BUTTON_TEXT_LIMIT = 64
@@ -29,22 +29,6 @@ def _clamp_section_index(checklist_type: str, section_index: int) -> int:
     if sections_count == 0:
         return 0
     return max(0, min(section_index, sections_count - 1))
-
-
-def _shorten_button_text(text: str, limit: int = BUTTON_TEXT_LIMIT) -> str:
-    """Сокращает текст кнопки до безопасной длины.
-
-    Args:
-        text: Исходный текст кнопки.
-        limit: Максимальная длина текста.
-
-    Returns:
-        Сокращённый текст.
-    """
-    compact = text.strip()
-    if len(compact) <= limit:
-        return compact
-    return compact[:limit].rstrip()
 
 
 def _item_button_text(

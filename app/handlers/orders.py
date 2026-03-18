@@ -22,7 +22,7 @@ from app.handlers.constants import (
 )
 from app.handlers.states import OrderStates
 from app.handlers.utils import notify_work_chat, now_local, parse_positive_number
-from app.orders import (
+from app.order_catalog import (
     ORDER_TITLES,
     build_order_keyboard,
     build_order_text,

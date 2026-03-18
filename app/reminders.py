@@ -8,7 +8,7 @@ from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.checklists import checklist_total_items
+from app.checklist.ui import checklist_total_items
 from app.config import Settings
 from app.db import Database
 

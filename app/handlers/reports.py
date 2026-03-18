@@ -7,8 +7,8 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from app.checklist_data import CLOSE_RESIDUAL_INPUTS
-from app.checklists import checklist_total_items
+from app.checklist.data import CLOSE_RESIDUAL_INPUTS
+from app.checklist.ui import checklist_total_items
 from app.db import Database
 from app.handlers.constants import MENU_REPORTS
 

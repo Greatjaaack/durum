@@ -24,7 +24,7 @@ from app.handlers.utils import (
     employee_name,
     notify_owner,
 )
-from app.reports import build_daily_report
+from app.report_builder import build_daily_report
 
 
 logger = logging.getLogger(__name__)
