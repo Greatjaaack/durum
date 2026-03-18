@@ -26,7 +26,7 @@ class OpenRouterClient:
         api_key: str,
         model: str,
         timeout_sec: int = 45,
-        app_title: str = "Durum Shift Bot",
+        app_title: str = "Durum Bot",
     ) -> None:
         """Инициализирует клиент OpenRouter.
 

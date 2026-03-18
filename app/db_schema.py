@@ -224,11 +224,49 @@ def ensure_close_residual_columns(
         """
         UPDATE close_residuals
         SET
-            unit_type = 'portion',
-            input_value = quantity,
-            normalized_quantity = quantity,
-            normalized_unit = 'порц'
+            unit_type = 'liter',
+            input_value = CASE
+                WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml') THEN quantity / 1000.0
+                WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g') THEN quantity / 1000.0
+                WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity
+                ELSE quantity
+            END,
+            normalized_quantity = CASE
+                WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml') THEN quantity / 1000.0
+                WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g') THEN quantity / 1000.0
+                WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity
+                ELSE quantity
+            END,
+            normalized_unit = 'л',
+            unit = 'л'
         WHERE unit_type = 'legacy' AND item_key = 'soup'
+        """
+    )
+    conn.execute(
+        """
+        UPDATE close_residuals
+        SET
+            unit_type = 'liter',
+            quantity = CASE
+                WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g', 'мл', 'ml') THEN quantity / 1000.0
+                WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity
+                ELSE quantity
+            END,
+            input_value = CASE
+                WHEN input_value IS NULL THEN NULL
+                WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g', 'мл', 'ml') THEN input_value / 1000.0
+                WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN input_value
+                ELSE input_value
+            END,
+            normalized_quantity = CASE
+                WHEN normalized_quantity IS NULL THEN NULL
+                WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g', 'мл', 'ml') THEN normalized_quantity / 1000.0
+                WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN normalized_quantity
+                ELSE normalized_quantity
+            END,
+            normalized_unit = 'л',
+            unit = 'л'
+        WHERE item_key = 'soup' AND unit_type = 'weight_g'
         """
     )
     conn.execute(

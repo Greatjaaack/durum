@@ -1552,6 +1552,27 @@ def _get_display_residual(
     return normalized
 
 
+def _get_residual_display_unit(
+    residuals: dict[str, dict[str, object]],
+    item_key: str,
+    default_unit: str,
+) -> str:
+    """Возвращает единицу отображения остатка.
+
+    Args:
+        residuals: Словарь остатков смены.
+        item_key: Ключ остатка.
+        default_unit: Единица по умолчанию.
+
+    Returns:
+        Единица отображения.
+    """
+    row = residuals.get(item_key, {})
+    unit_raw = row.get("unit") if isinstance(row, dict) else None
+    unit = str(unit_raw or "").strip()
+    return unit or default_unit
+
+
 def _close_duration_label(
     close_duration_sec: int | None,
 ) -> str:
@@ -1652,7 +1673,9 @@ def _build_close_done_details_text(
     lavash: float,
     fried_lavash: float,
     soup: float,
-    sauce_gastro: float,
+    soup_unit: str,
+    sauce: float,
+    sauce_unit: str,
 ) -> str:
     """Строит экран деталей закрытой смены.
 
@@ -1661,8 +1684,10 @@ def _build_close_done_details_text(
         fried_chicken_kg: Остаток жареной курицы (кг).
         lavash: Остаток лаваша (шт).
         fried_lavash: Остаток жареного лаваша (шт).
-        soup: Остаток супа (г).
-        sauce_gastro: Остаток соуса (гастроёмк).
+        soup: Остаток супа в отображаемой единице.
+        soup_unit: Единица измерения супа.
+        sauce: Остаток соуса в отображаемой единице.
+        sauce_unit: Единица измерения соуса.
 
     Returns:
         Текст экрана деталей.
@@ -1674,8 +1699,8 @@ def _build_close_done_details_text(
         f"🍗 Жареная курица — {fmt_number(fried_chicken_kg)} кг\n"
         f"🌯 Лаваш — {fmt_number(lavash)} шт\n"
         f"🥙 Жареный лаваш — {fmt_number(fried_lavash)} шт\n"
-        f"🍲 Суп — {fmt_number(soup)} г\n"
-        f"🧴 Соус — {fmt_number(sauce_gastro)} гастроёмк."
+        f"🍲 Суп — {fmt_number(soup)} {soup_unit}\n"
+        f"🧴 Соус — {fmt_number(sauce)} {sauce_unit}"
     )
 
 
@@ -1861,8 +1886,8 @@ async def _close_wizard_finalize(
         if "fried_lavash" in residuals
         else 0.0
     )
-    soup = _get_normalized_residual(residuals, "soup") if "soup" in residuals else 0.0
-    sauce_gastro = _get_display_residual(residuals, "sauce") if "sauce" in residuals else 0.0
+    soup_l = _get_display_residual(residuals, "soup") if "soup" in residuals else 0.0
+    sauce_l = _get_display_residual(residuals, "sauce") if "sauce" in residuals else 0.0
 
     marinated_chicken = marinated_chicken_g / 1000.0
     fried_chicken = fried_chicken_g / 1000.0
@@ -1901,22 +1926,18 @@ async def _close_wizard_finalize(
     duration_text = _close_duration_label(close_duration_sec)
     all_items_completed = len(completed) == close_wizard_total_items()
 
-    await notify_owner(
-        bot,
-        settings,
-        (
-            "Смена закрыта\n"
-            f"Сотрудник: {employee}\n"
-            f"Время: {now.strftime('%H:%M')}\n"
-            f"Длительность закрытия: {duration_text}\n"
-            f"Расход мяса: {meat_used if meat_used is not None else 'н/д'}\n"
-            f"Остаток маринованной курицы: {fmt_number(marinated_chicken)} кг\n"
-            f"Остаток жареной курицы: {fmt_number(fried_chicken)} кг\n"
-            f"Остаток лаваша: {fmt_number(lavash)} шт\n"
-            f"Остаток жареного лаваша: {fmt_number(fried_lavash)} шт\n"
-            f"Остаток супа: {fmt_number(soup)} г\n"
-            f"Остаток соуса: {fmt_number(sauce_gastro)} гастроёмк."
-        ),
+    owner_close_text = (
+        "Смена закрыта\n"
+        f"Сотрудник: {employee}\n"
+        f"Время: {now.strftime('%H:%M')}\n"
+        f"Длительность закрытия: {duration_text}\n"
+        f"Расход мяса: {meat_used if meat_used is not None else 'н/д'}\n"
+        f"Остаток маринованной курицы: {fmt_number(marinated_chicken)} кг\n"
+        f"Остаток жареной курицы: {fmt_number(fried_chicken)} кг\n"
+        f"Остаток лаваша: {fmt_number(lavash)} шт\n"
+        f"Остаток жареного лаваша: {fmt_number(fried_lavash)} шт\n"
+        f"Остаток супа: {fmt_number(soup_l)} л\n"
+        f"Остаток соуса: {fmt_number(sauce_l)} л"
     )
 
     close_report_text = (
@@ -1930,10 +1951,15 @@ async def _close_wizard_finalize(
         f"Жареная курица — {fmt_number(fried_chicken)} кг\n"
         f"Лаваш — {fmt_number(lavash)} шт\n"
         f"Жареный лаваш — {fmt_number(fried_lavash)} шт\n"
-        f"Суп — {fmt_number(soup)} г\n"
-        f"Соус — {fmt_number(sauce_gastro)} гастроёмк."
+        f"Суп — {fmt_number(soup_l)} л\n"
+        f"Соус — {fmt_number(sauce_l)} л"
     )
-    await notify_work_chat(bot, settings, close_report_text)
+    work_chat_status = await notify_work_chat(bot, settings, close_report_text)
+    if (
+        settings.owner_id != settings.work_chat_id
+        and work_chat_status != "owner_fallback"
+    ):
+        await notify_owner(bot, settings, owner_close_text)
 
     confirmation_text = _build_close_done_summary_text(
         employee=employee,
@@ -2014,8 +2040,10 @@ async def close_done_callback(
         if "fried_lavash" in residuals
         else 0.0
     )
-    soup = _get_normalized_residual(residuals, "soup") if "soup" in residuals else 0.0
-    sauce_gastro = _get_display_residual(residuals, "sauce") if "sauce" in residuals else 0.0
+    soup = _get_display_residual(residuals, "soup") if "soup" in residuals else 0.0
+    sauce = _get_display_residual(residuals, "sauce") if "sauce" in residuals else 0.0
+    soup_unit = _get_residual_display_unit(residuals, "soup", "л")
+    sauce_unit = _get_residual_display_unit(residuals, "sauce", "л")
 
     marinated_chicken_kg = marinated_chicken_g / 1000.0
     fried_chicken_kg = fried_chicken_g / 1000.0
@@ -2027,7 +2055,9 @@ async def close_done_callback(
             lavash=lavash,
             fried_lavash=fried_lavash,
             soup=soup,
-            sauce_gastro=sauce_gastro,
+            soup_unit=soup_unit,
+            sauce=sauce,
+            sauce_unit=sauce_unit,
         )
         await safe_edit_text(
             callback.message,

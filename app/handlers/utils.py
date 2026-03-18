@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 from datetime import datetime
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
@@ -139,7 +140,7 @@ def parse_close_residual_value(
     if not text:
         return None
 
-    if item_key == "sauce":
+    if item_key in {"sauce", "soup"}:
         return parse_mixed_number(text)
 
     return parse_non_negative_number(text)
@@ -244,7 +245,7 @@ async def notify_work_chat(
     bot: Bot,
     settings: Settings,
     text: str,
-) -> None:
+) -> Literal["work_chat", "owner_fallback", "failed"]:
     """Отправляет уведомление в рабочий чат.
 
     Args:
@@ -253,10 +254,13 @@ async def notify_work_chat(
         text: Текст сообщения.
 
     Returns:
-        None.
+        `work_chat`, если отправлено в рабочий чат;
+        `owner_fallback`, если отправлено владельцу как fallback;
+        `failed`, если отправить не удалось.
     """
     try:
         await bot.send_message(settings.work_chat_id, text)
+        return "work_chat"
     except TelegramBadRequest as error:
         if "chat not found" in str(error).lower():
             logger.warning(
@@ -268,9 +272,12 @@ async def notify_work_chat(
                     settings.owner_id,
                     "⚠ Рабочий чат недоступен, отправляю отчёт владельцу.\n\n" + text,
                 )
+                return "owner_fallback"
             except Exception:
                 logger.exception("Failed to send fallback message to owner")
-            return
+                return "failed"
         logger.exception("Failed to send message to work chat")
+        return "failed"
     except Exception:
         logger.exception("Failed to send message to work chat")
+        return "failed"

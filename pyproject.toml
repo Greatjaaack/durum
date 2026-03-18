@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "durum-shift-bot"
+name = "durum-bot"
 version = "0.1.0"
-description = "Telegram bot for managing durum shop shifts."
+description = "Telegram bot for durum shop operations."
 authors = ["Durum Team"]
 readme = "README.md"
 package-mode = false

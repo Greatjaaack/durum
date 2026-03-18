@@ -9,6 +9,7 @@ UNIT_TYPE_BASE_UNITS: dict[str, str] = {
     "weight_g": "г",
     "piece": "шт",
     "portion": "порц",
+    "liter": "л",
     "gastro_unit": "гастроёмк",
     "sauce_gastro": "гастроёмк",
     "legacy_ml": "мл",
