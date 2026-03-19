@@ -481,6 +481,63 @@ def _fetch_residuals_for_shifts(
     ).fetchall()
 
 
+def _short_media_label(raw_label: str) -> str:
+    """Сокращает подпись пункта для отображения рядом с фото.
+
+    Args:
+        raw_label: Полный текст пункта.
+
+    Returns:
+        Короткая подпись.
+    """
+    text = raw_label.strip()
+    if len(text) <= 36:
+        return text
+    return f"{text[:35].rstrip()}…"
+
+
+def _fetch_close_media_for_shifts(
+    conn: sqlite3.Connection,
+    shift_ids: list[int],
+) -> dict[int, list[dict[str, object]]]:
+    """Возвращает фото-подтверждения по сменам.
+
+    Args:
+        conn: Подключение SQLite.
+        shift_ids: Список ID смен.
+
+    Returns:
+        Словарь: shift_id -> список фото.
+    """
+    if not shift_ids or not _table_exists(conn, "close_checklist_media"):
+        return {}
+
+    placeholders = ",".join("?" for _ in shift_ids)
+    rows = conn.execute(
+        f"""
+        SELECT id, shift_id, item_index, item_label, created_at
+        FROM close_checklist_media
+        WHERE shift_id IN ({placeholders})
+        ORDER BY shift_id DESC, item_index ASC, id DESC
+        """,
+        tuple(shift_ids),
+    ).fetchall()
+
+    result: dict[int, list[dict[str, object]]] = {}
+    for row in rows:
+        shift_id = int(row["shift_id"])
+        item_label = str(row["item_label"] or "Фото")
+        result.setdefault(shift_id, []).append(
+            {
+                "media_id": int(row["id"]),
+                "item_label": item_label,
+                "item_short": _short_media_label(item_label),
+                "created_at": str(row["created_at"] or ""),
+            }
+        )
+    return result
+
+
 def _fetch_residual_baseline_avg(
     conn: sqlite3.Connection,
 ) -> dict[str, float]:
@@ -580,6 +637,7 @@ def _residual_row_normalized_unit(
 def _build_shift_models(
     shifts_rows: list[sqlite3.Row],
     checklist_state: dict[int, dict[str, set[int]]],
+    close_media_by_shift: dict[int, list[dict[str, object]]],
 ) -> list[dict[str, object]]:
     """Формирует модели смен для таблицы.
 
@@ -620,6 +678,7 @@ def _build_shift_models(
             else "В процессе"
         )
         close_status_details = close_status_labels if is_closed_shift else []
+        media_items = close_media_by_shift.get(shift_id, [])
 
         models.append(
             {
@@ -638,6 +697,8 @@ def _build_shift_models(
                 "close_status_labels": close_status_details,
                 "close_status_summary": close_status_summary,
                 "has_checklist_error": has_checklist_error,
+                "close_media_count": len(media_items),
+                "close_media_items": media_items,
             }
         )
     return models
@@ -859,11 +920,13 @@ def build_dashboard_payload(
 
     checklist_state = _fetch_checklists_for_shifts(conn, shift_ids)
     residual_rows = _fetch_residuals_for_shifts(conn, shift_ids)
+    close_media_by_shift = _fetch_close_media_for_shifts(conn, shift_ids)
     residual_baseline = _fetch_residual_baseline_avg(conn)
 
     shifts = _build_shift_models(
         shifts_rows=shifts_rows,
         checklist_state=checklist_state,
+        close_media_by_shift=close_media_by_shift,
     )
     residual_analytics = _build_residual_analytics(
         residual_rows=residual_rows,

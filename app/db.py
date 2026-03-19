@@ -216,6 +216,18 @@ class Database:
             UNIQUE(shift_id, item_key)
         );
 
+        CREATE TABLE IF NOT EXISTS close_checklist_media (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shift_id INTEGER NOT NULL,
+            item_index INTEGER NOT NULL,
+            item_label TEXT NOT NULL,
+            file_id TEXT NOT NULL,
+            file_unique_id TEXT,
+            mime_type TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(shift_id, item_index)
+        );
+
         CREATE TABLE IF NOT EXISTS food_facts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fact TEXT NOT NULL,
@@ -236,6 +248,7 @@ class Database:
         CREATE INDEX IF NOT EXISTS idx_checklist_state_shift ON checklist_state(shift_id);
         CREATE INDEX IF NOT EXISTS idx_close_residuals_shift ON close_residuals(shift_id);
         CREATE INDEX IF NOT EXISTS idx_close_residuals_date ON close_residuals(date);
+        CREATE INDEX IF NOT EXISTS idx_close_checklist_media_shift ON close_checklist_media(shift_id);
         CREATE INDEX IF NOT EXISTS idx_food_facts_created_at ON food_facts(created_at);
         """
         await asyncio.to_thread(self._execute_script, schema)
@@ -542,6 +555,63 @@ class Database:
                 "employee_id": row["employee_id"],
             }
         return result
+
+    async def upsert_close_checklist_media(
+        self,
+        *,
+        shift_id: int,
+        item_index: int,
+        item_label: str,
+        file_id: str,
+        file_unique_id: str | None,
+        mime_type: str | None,
+        created_at: str,
+    ) -> None:
+        """Создаёт или обновляет фото для пункта закрытия смены.
+
+        Args:
+            shift_id: Идентификатор смены.
+            item_index: Индекс пункта в мастере закрытия.
+            item_label: Текст пункта.
+            file_id: Telegram file_id.
+            file_unique_id: Telegram file_unique_id.
+            mime_type: MIME-тип файла.
+            created_at: Время фиксации фото.
+
+        Returns:
+            None.
+        """
+        query = """
+        INSERT INTO close_checklist_media (
+            shift_id,
+            item_index,
+            item_label,
+            file_id,
+            file_unique_id,
+            mime_type,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(shift_id, item_index) DO UPDATE
+        SET item_label = excluded.item_label,
+            file_id = excluded.file_id,
+            file_unique_id = excluded.file_unique_id,
+            mime_type = excluded.mime_type,
+            created_at = excluded.created_at
+        """
+        await asyncio.to_thread(
+            self._execute,
+            query,
+            (
+                shift_id,
+                item_index,
+                item_label,
+                file_id,
+                file_unique_id,
+                mime_type,
+                created_at,
+            ),
+        )
 
     async def set_shift_meat_start(self, shift_id: int, meat_start: float) -> None:
         """Сохраняет стартовый остаток мяса для смены.

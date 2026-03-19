@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request as URLRequest
+from urllib.request import urlopen
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -71,6 +76,18 @@ def _dashboard_db_path() -> Path:
         Путь к файлу базы данных.
     """
     return Path(os.getenv("DB_PATH", "data/shifts.db")).expanduser()
+
+
+def _dashboard_bot_token() -> str:
+    """Возвращает BOT_TOKEN для прокси медиа dashboard.
+
+    Args:
+        Нет параметров.
+
+    Returns:
+        Значение BOT_TOKEN или пустую строку.
+    """
+    return os.getenv("BOT_TOKEN", "").strip()
 
 
 def _connect() -> sqlite3.Connection:
@@ -141,6 +158,32 @@ def _normalize_date(
         return value
     except ValueError:
         return None
+
+
+def _telegram_file_path(
+    bot_token: str,
+    file_id: str,
+) -> str | None:
+    """Получает путь файла в Telegram по file_id.
+
+    Args:
+        bot_token: Токен Telegram-бота.
+        file_id: Идентификатор файла Telegram.
+
+    Returns:
+        Относительный путь файла или None.
+    """
+    payload = urlencode({"file_id": file_id}).encode("utf-8")
+    request = URLRequest(f"https://api.telegram.org/bot{bot_token}/getFile", data=payload)
+    with urlopen(request, timeout=20) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    if not isinstance(data, dict) or not data.get("ok"):
+        return None
+    result = data.get("result")
+    if not isinstance(result, dict):
+        return None
+    file_path = str(result.get("file_path") or "").strip()
+    return file_path or None
 
 
 @app.get("/")
@@ -227,4 +270,70 @@ def dashboard(
         request=request,
         name="dashboard.html",
         context=payload,
+    )
+
+
+@app.get("/dashboard/media/{media_id}", name="dashboard_media")
+def dashboard_media(
+    media_id: int,
+) -> Response:
+    """Проксирует фото чек-листа из Telegram для дашборда.
+
+    Args:
+        media_id: Идентификатор фото в таблице close_checklist_media.
+
+    Returns:
+        Бинарный ответ изображения.
+    """
+    bot_token = _dashboard_bot_token()
+    if not bot_token:
+        raise HTTPException(status_code=503, detail="BOT_TOKEN is not configured")
+
+    conn = _connect()
+    try:
+        try:
+            row = conn.execute(
+                """
+                SELECT file_id, mime_type
+                FROM close_checklist_media
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (media_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            raise HTTPException(status_code=404, detail="Photo not found") from None
+    finally:
+        conn.close()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Photo not found")
+
+    file_id = str(row["file_id"] or "").strip()
+    if not file_id:
+        raise HTTPException(status_code=404, detail="Photo not found")
+
+    try:
+        file_path = _telegram_file_path(bot_token, file_id)
+        if not file_path:
+            raise HTTPException(status_code=404, detail="Photo file is unavailable")
+
+        file_request = URLRequest(f"https://api.telegram.org/file/bot{bot_token}/{file_path}")
+        with urlopen(file_request, timeout=25) as file_response:
+            content = file_response.read()
+            content_type = str(file_response.headers.get("Content-Type") or "").strip()
+    except HTTPException:
+        raise
+    except (HTTPError, URLError, TimeoutError):
+        logger.exception("Failed to proxy checklist photo media_id=%s", media_id)
+        raise HTTPException(status_code=502, detail="Failed to fetch photo from Telegram") from None
+    except Exception:
+        logger.exception("Unexpected error while proxying checklist photo media_id=%s", media_id)
+        raise HTTPException(status_code=500, detail="Unexpected media proxy error") from None
+
+    media_type = content_type or str(row["mime_type"] or "").strip() or "image/jpeg"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Cache-Control": "private, max-age=300"},
     )

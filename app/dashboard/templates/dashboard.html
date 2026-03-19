@@ -148,6 +148,7 @@
           <th>Длительность</th>
           <th>Закрытие чек-листа</th>
           <th>Статус чек-листа</th>
+          <th>Фото чек-листа</th>
         </tr>
       </thead>
       <tbody>
@@ -167,11 +168,34 @@
             <span class="status-details">{{ row.close_status_labels | join(" · ") }}</span>
             {% endif %}
           </td>
+          <td class="media-cell">
+            {% if row.close_media_items %}
+            <div class="media-list">
+              {% for media in row.close_media_items %}
+              <a
+                class="media-thumb"
+                href="/dashboard/media/{{ media.media_id }}"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="{{ media.item_label }}"
+              >
+                <img
+                  src="/dashboard/media/{{ media.media_id }}"
+                  alt="{{ media.item_short }}"
+                  loading="lazy"
+                />
+              </a>
+              {% endfor %}
+            </div>
+            {% else %}
+            <span class="muted">—</span>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
         {% else %}
         <tr>
-          <td colspan="8">Нет данных за выбранный период</td>
+          <td colspan="9">Нет данных за выбранный период</td>
         </tr>
         {% endif %}
       </tbody>

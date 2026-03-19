@@ -2785,6 +2785,35 @@ async def close_wizard_media_input(
             )
             return
 
+    media_file_id: str | None = None
+    media_file_unique_id: str | None = None
+    media_mime_type: str | None = None
+    if message.photo:
+        largest = message.photo[-1]
+        media_file_id = str(largest.file_id)
+        media_file_unique_id = str(largest.file_unique_id)
+        media_mime_type = "image/jpeg"
+    elif message.document:
+        media_file_id = str(message.document.file_id)
+        media_file_unique_id = str(message.document.file_unique_id)
+        media_mime_type = str(message.document.mime_type or "").strip() or None
+
+    if media_file_id:
+        created_at = (
+            message.date.isoformat()
+            if message.date is not None
+            else datetime.utcnow().replace(microsecond=0).isoformat()
+        )
+        await db.upsert_close_checklist_media(
+            shift_id=shift_id,
+            item_index=item.index,
+            item_label=item.text,
+            file_id=media_file_id,
+            file_unique_id=media_file_unique_id,
+            mime_type=media_mime_type,
+            created_at=created_at,
+        )
+
     completed.add(item.index)
     target_section = _close_wizard_next_section_after_completion(
         current_section=item.section_index,
