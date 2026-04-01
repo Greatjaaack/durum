@@ -16,11 +16,13 @@ from app.checklist.data import (
     CHECKLISTS,
     CLOSE_CHECKLIST,
     CLOSE_RESIDUAL_INPUTS,
+    CLOSE_RESIDUAL_INPUTS_BY_CHECKLIST_ITEM,
     CLOSE_SECTION_EMOJI_BY_TITLE,
 )
 from app.checklist.ui import (
     build_checklist_keyboard,
     build_checklist_text,
+    checklist_total_items,
     normalize_checklist_section,
 )
 from app.config import Settings
@@ -42,6 +44,7 @@ from app.handlers.utils import (
     notify_work_chat,
     now_local,
     parse_close_residual_value,
+    safe_answer_callback,
     safe_delete_message,
     safe_edit_text,
 )
@@ -197,7 +200,9 @@ def _build_close_wizard_items() -> tuple[CloseWizardItem, ...]:
         section_emoji = CLOSE_SECTION_EMOJI_BY_TITLE.get(section_title, "▫️")
         for item_text_raw in section["items"]:
             item_text = str(item_text_raw).strip()
-            residual_config = CLOSE_RESIDUAL_INPUTS.get(item_text)
+            residual_config = CLOSE_RESIDUAL_INPUTS_BY_CHECKLIST_ITEM.get(item_text)
+            if residual_config is None:
+                residual_config = CLOSE_RESIDUAL_INPUTS.get(item_text)
             if residual_config:
                 residual_key = str(residual_config["key"])
                 input_rule = INPUT_RULES.get(residual_key)
@@ -685,6 +690,19 @@ async def open_shift(
 
     active_shift = await db.get_active_shift(message.from_user.id)
     if active_shift:
+        shift_id = int(active_shift["id"])
+        open_state = await db.get_checklist_state(
+            shift_id=shift_id,
+            checklist_type="open",
+        )
+        open_done = len(open_state["completed"]) if open_state else 0
+        open_total = checklist_total_items("open")
+        if open_done < open_total:
+            await state.clear()
+            await message.answer("У вас уже открыта смена. Продолжим чек-лист открытия.")
+            await _start_checklist(message, state, db, "open", shift_id)
+            return
+
         await message.answer(
             "У вас уже открыта смена.",
             reply_markup=build_shift_menu_keyboard(is_shift_open=True),
@@ -914,7 +932,9 @@ def _close_wizard_short_button_text(
     value = text.strip()
     if len(value) <= limit:
         return value
-    return value[:limit].rstrip()
+    if limit <= 3:
+        return value[:limit]
+    return value[: limit - 3].rstrip() + "..."
 
 
 def _close_wizard_item_button_text(
@@ -1727,30 +1747,122 @@ def _build_close_done_details_keyboard(
     )
 
 
+async def _edit_close_wizard_message(
+    *,
+    source_message: Message,
+    state: FSMContext,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    log_context: str,
+) -> None:
+    """Редактирует сохранённое сообщение мастера закрытия или отправляет новое.
+
+    Args:
+        source_message: Текущее сообщение-источник события.
+        state: FSM-контекст пользователя.
+        text: Новый текст.
+        reply_markup: Inline-клавиатура или None.
+        log_context: Метка контекста для логов.
+
+    Returns:
+        None.
+    """
+    state_data = await state.get_data()
+    chat_id_raw = state_data.get(CLOSE_WIZARD_MESSAGE_CHAT_KEY)
+    message_id_raw = state_data.get(CLOSE_WIZARD_MESSAGE_ID_KEY)
+    try:
+        chat_id = int(chat_id_raw)
+        message_id = int(message_id_raw)
+    except (TypeError, ValueError):
+        chat_id = None
+        message_id = None
+
+    if chat_id is not None and message_id is not None:
+        try:
+            await source_message.bot.edit_message_text(
+                text=text,
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=reply_markup,
+            )
+            return
+        except TelegramBadRequest as error:
+            error_text_lc = str(error).lower()
+            if "message is not modified" in error_text_lc:
+                logger.info("Skipped %s edit: no changes", log_context)
+                return
+            if "message to edit not found" not in error_text_lc and "message can't be edited" not in error_text_lc:
+                raise
+            logger.warning("Сообщение мастера закрытия не найдено, отправляем новое")
+
+    sent = await source_message.answer(text, reply_markup=reply_markup)
+    await state.update_data(
+        {
+            CLOSE_WIZARD_MESSAGE_CHAT_KEY: sent.chat.id,
+            CLOSE_WIZARD_MESSAGE_ID_KEY: sent.message_id,
+        }
+    )
+
+
 async def _close_wizard_finalize(
-    callback: CallbackQuery,
     state: FSMContext,
     db: Database,
     settings: Settings,
     bot: Bot,
     *,
     force_finish: bool = False,
+    callback: CallbackQuery | None = None,
+    source_message: Message | None = None,
+    actor_id: int | None = None,
+    actor_username: str | None = None,
+    actor_full_name: str | None = None,
 ) -> bool:
     """Финализирует закрытие смены из мастера.
 
     Args:
-        callback: Callback-запрос Telegram.
         state: FSM-контекст пользователя.
         db: Экземпляр базы данных.
         settings: Настройки приложения.
         bot: Экземпляр Telegram-бота.
         force_finish: Разрешает закрытие при незаполненных пунктах.
+        callback: Callback-запрос Telegram (если финализация вызвана из кнопки).
+        source_message: Сообщение-источник (если финализация вызвана не из callback).
+        actor_id: Telegram ID сотрудника.
+        actor_username: Username сотрудника.
+        actor_full_name: Полное имя сотрудника.
 
     Returns:
         True, если смена успешно закрыта.
     """
-    if not callback.message or not callback.from_user:
+    if callback is not None:
+        if not callback.message or not callback.from_user:
+            return False
+        source_message = callback.message
+        actor_id = callback.from_user.id
+        actor_username = callback.from_user.username
+        actor_full_name = callback.from_user.full_name
+
+    if source_message is None or actor_id is None:
         return False
+    actor_name = str(actor_full_name or "").strip() or "Сотрудник"
+    employee = f"@{actor_username}" if actor_username else actor_name
+
+    async def _respond(
+        text: str | None = None,
+        *,
+        show_alert: bool = False,
+    ) -> None:
+        if callback is not None:
+            await safe_answer_callback(
+                callback,
+                text,
+                show_alert=show_alert,
+                log_context="close wizard finalize",
+            )
+            return
+        if text:
+            prefix = "⚠️ " if show_alert else ""
+            await source_message.answer(prefix + text)
 
     state_data = await state.get_data()
     (
@@ -1763,7 +1875,7 @@ async def _close_wizard_finalize(
         started_at,
     ) = _close_wizard_parse_context(state_data)
     if shift_id is None:
-        await callback.answer("Сценарий закрытия потерян. Запустите /close заново.", show_alert=True)
+        await _respond("Сценарий закрытия потерян. Запустите /close заново.", show_alert=True)
         return False
 
     total = close_wizard_total_items()
@@ -1780,7 +1892,7 @@ async def _close_wizard_finalize(
             started_at=started_at,
         )
         await _render_close_wizard_screen(
-            source_message=callback.message,
+            source_message=source_message,
             state=state,
             active_section=active_section,
             selected_item_index=None,
@@ -1788,14 +1900,9 @@ async def _close_wizard_finalize(
             completed=completed,
             values=values,
         )
-        await callback.answer("Вы не завершили все пункты", show_alert=True)
+        await _respond("Вы не завершили все пункты", show_alert=True)
         return False
 
-    employee = (
-        f"@{callback.from_user.username}"
-        if callback.from_user.username
-        else callback.from_user.full_name
-    )
     residuals = await db.get_close_residuals(shift_id)
     missing_residual_keys = [key for key in CLOSE_REQUIRED_RESIDUAL_KEYS if key not in residuals]
     if missing_residual_keys and not force_finish:
@@ -1818,7 +1925,7 @@ async def _close_wizard_finalize(
             started_at=started_at,
         )
         await _render_close_wizard_screen(
-            source_message=callback.message,
+            source_message=source_message,
             state=state,
             active_section=active_section,
             selected_item_index=selected_item_index,
@@ -1827,7 +1934,7 @@ async def _close_wizard_finalize(
             values=values,
             error_text=f"Вы не заполнили остаток: {missing_label}",
         )
-        await callback.answer(f"Вы не заполнили остаток: {missing_label}", show_alert=True)
+        await _respond(f"Вы не заполнили остаток: {missing_label}", show_alert=True)
         return False
 
     if missing_residual_keys and force_finish:
@@ -1842,7 +1949,7 @@ async def _close_wizard_finalize(
                 db=db,
                 settings=settings,
                 employee=employee,
-                employee_id=callback.from_user.id,
+                employee_id=actor_id,
                 shift_id=shift_id,
                 item=item,
                 display_value=0.0,
@@ -1899,7 +2006,7 @@ async def _close_wizard_finalize(
         photo=None,
         meat_end=marinated_chicken,
         lavash_end=lavash,
-        closed_by_id=callback.from_user.id,
+        closed_by_id=actor_id,
         closed_by_name=employee,
         close_duration_sec=close_duration_sec,
     )
@@ -1911,7 +2018,7 @@ async def _close_wizard_finalize(
         quantity=marinated_chicken,
         stock_date=stock_date,
         employee=employee,
-        employee_id=callback.from_user.id,
+        employee_id=actor_id,
         stock_time=stock_time,
     )
     await db.save_stock(
@@ -1919,7 +2026,7 @@ async def _close_wizard_finalize(
         quantity=lavash,
         stock_date=stock_date,
         employee=employee,
-        employee_id=callback.from_user.id,
+        employee_id=actor_id,
         stock_time=stock_time,
     )
 
@@ -1967,22 +2074,23 @@ async def _close_wizard_finalize(
         duration_label=duration_text,
         all_items_completed=all_items_completed,
     )
-    await safe_edit_text(
-        callback.message,
-        confirmation_text,
+    await _edit_close_wizard_message(
+        source_message=source_message,
+        state=state,
+        text=confirmation_text,
         reply_markup=_build_close_done_summary_keyboard(shift_id),
         log_context="close done summary",
     )
-    await callback.answer("Смена закрыта")
+    await _respond("Смена закрыта")
     await state.clear()
-    await callback.message.answer(
+    await source_message.answer(
         "Главное меню:",
         reply_markup=build_shift_menu_keyboard(is_shift_open=False),
     )
     logger.info(
         "Смена закрыта shift_id=%s employee_id=%s duration_sec=%s",
         shift_id,
-        callback.from_user.id,
+        actor_id,
         close_duration_sec,
     )
     return True
@@ -2005,21 +2113,29 @@ async def close_done_callback(
     if not callback.data or not callback.message:
         return
 
+    async def _answer(text: str | None = None, *, show_alert: bool = False) -> None:
+        await safe_answer_callback(
+            callback,
+            text,
+            show_alert=show_alert,
+            log_context="close done callback",
+        )
+
     parts = callback.data.split(":")
     if len(parts) != 3:
-        await callback.answer()
+        await _answer()
         return
 
     _, action, shift_id_raw = parts
     try:
         shift_id = int(shift_id_raw)
     except ValueError:
-        await callback.answer("Некорректный идентификатор смены", show_alert=True)
+        await _answer("Некорректный идентификатор смены", show_alert=True)
         return
 
     shift = await db.get_shift_by_id(shift_id)
     if not shift:
-        await callback.answer("Смена не найдена", show_alert=True)
+        await _answer("Смена не найдена", show_alert=True)
         return
 
     residuals = await db.get_close_residuals(shift_id)
@@ -2065,7 +2181,7 @@ async def close_done_callback(
             reply_markup=_build_close_done_details_keyboard(shift_id),
             log_context="close done details",
         )
-        await callback.answer()
+        await _answer()
         return
 
     if action == "back":
@@ -2096,10 +2212,10 @@ async def close_done_callback(
             reply_markup=_build_close_done_summary_keyboard(shift_id),
             log_context="close done summary",
         )
-        await callback.answer()
+        await _answer()
         return
 
-    await callback.answer()
+    await _answer()
 
 
 @shift_router.callback_query(F.data.startswith(f"{CLOSE_WIZARD_CALLBACK_PREFIX}:"))
@@ -2125,13 +2241,21 @@ async def close_wizard_callback(
     if not callback.data or not callback.message or not callback.from_user:
         return
 
+    async def _answer(text: str | None = None, *, show_alert: bool = False) -> None:
+        await safe_answer_callback(
+            callback,
+            text,
+            show_alert=show_alert,
+            log_context="close wizard callback",
+        )
+
     if await state.get_state() != CloseShiftStates.wizard.state:
-        await callback.answer("Сценарий неактивен. Запустите /close заново.", show_alert=True)
+        await _answer("Сценарий неактивен. Запустите /close заново.", show_alert=True)
         return
 
     parts = callback.data.split(":", 2)
     if len(parts) < 2:
-        await callback.answer()
+        await _answer()
         return
     action = parts[1]
     action_value = parts[2] if len(parts) == 3 else ""
@@ -2147,7 +2271,7 @@ async def close_wizard_callback(
         started_at,
     ) = _close_wizard_parse_context(state_data)
     if shift_id is None:
-        await callback.answer("Не удалось определить смену. Запустите /close заново.", show_alert=True)
+        await _answer("Не удалось определить смену. Запустите /close заново.", show_alert=True)
         return
 
     if action == "finish":
@@ -2172,7 +2296,7 @@ async def close_wizard_callback(
                 completed=completed,
                 values=values,
             )
-            await callback.answer("Вы не завершили все пункты", show_alert=True)
+            await _answer("Вы не завершили все пункты", show_alert=True)
             return
         await _close_wizard_finalize(
             callback=callback,
@@ -2205,7 +2329,7 @@ async def close_wizard_callback(
             completed=completed,
             values=values,
         )
-        await callback.answer()
+        await _answer()
         return
 
     if action == "finish_force":
@@ -2223,10 +2347,10 @@ async def close_wizard_callback(
         try:
             requested_section = int(action_value)
         except ValueError:
-            await callback.answer("Некорректный блок", show_alert=True)
+            await _answer("Некорректный блок", show_alert=True)
             return
         if requested_section < 0 or requested_section >= len(CHECKLISTS["close"]):
-            await callback.answer("Некорректный блок", show_alert=True)
+            await _answer("Некорректный блок", show_alert=True)
             return
         await _persist_close_wizard_progress(
             state=state,
@@ -2248,18 +2372,18 @@ async def close_wizard_callback(
             completed=completed,
             values=values,
         )
-        await callback.answer()
+        await _answer()
         return
 
     if action == "pick":
         try:
             picked_index = int(action_value)
         except ValueError:
-            await callback.answer("Некорректный пункт", show_alert=True)
+            await _answer("Некорректный пункт", show_alert=True)
             return
         item = close_wizard_item_by_index(picked_index)
         if not item:
-            await callback.answer("Некорректный пункт", show_alert=True)
+            await _answer("Некорректный пункт", show_alert=True)
             return
         if item.item_type == "check":
             if _close_wizard_item_requires_photo(item):
@@ -2285,7 +2409,7 @@ async def close_wizard_callback(
                         completed=completed,
                         values=values,
                     )
-                    await callback.answer()
+                    await _answer()
                     return
 
                 await _persist_close_wizard_progress(
@@ -2309,7 +2433,7 @@ async def close_wizard_callback(
                     values=values,
                     error_text="Отправьте фото (камера или галерея)",
                 )
-                await callback.answer("Жду фото")
+                await _answer("Жду фото")
                 return
 
             toggled_to_done = False
@@ -2354,7 +2478,7 @@ async def close_wizard_callback(
                 completed=completed,
                 values=values,
             )
-            await callback.answer()
+            await _answer()
             return
         await _persist_close_wizard_progress(
             state=state,
@@ -2376,7 +2500,7 @@ async def close_wizard_callback(
             completed=completed,
             values=values,
         )
-        await callback.answer("Отправьте фото")
+        await _answer("Введите значение")
         return
 
     if action in {"back", "skip"}:
@@ -2400,7 +2524,7 @@ async def close_wizard_callback(
             completed=completed,
             values=values,
         )
-        await callback.answer()
+        await _answer()
         return
 
     if finish_confirm:
@@ -2413,21 +2537,21 @@ async def close_wizard_callback(
             completed=completed,
             values=values,
         )
-        await callback.answer()
+        await _answer()
         return
 
     if selected_item_index is None:
-        await callback.answer("Сначала выберите пункт", show_alert=True)
+        await _answer("Сначала выберите пункт", show_alert=True)
         return
 
     item = close_wizard_item_by_index(selected_item_index)
     if not item:
-        await callback.answer("Пункт не найден. Запустите /close заново.", show_alert=True)
+        await _answer("Пункт не найден. Запустите /close заново.", show_alert=True)
         return
 
     if action == "done":
         if item.item_type != "check":
-            await callback.answer("Введите число текстом.", show_alert=True)
+            await _answer("Введите число текстом.", show_alert=True)
             return
         completed.add(item.index)
         target_section = _close_wizard_next_section_after_completion(
@@ -2464,7 +2588,7 @@ async def close_wizard_callback(
             completed=completed,
             values=values,
         )
-        await callback.answer()
+        await _answer()
         return
 
     if action == "quick":
@@ -2483,7 +2607,7 @@ async def close_wizard_callback(
                 values=values,
                 error_text=error_text,
             )
-            await callback.answer(error_text or "Ошибка ввода", show_alert=True)
+            await _answer(error_text or "Ошибка ввода", show_alert=True)
             return
 
         await _close_wizard_store_input(
@@ -2534,10 +2658,10 @@ async def close_wizard_callback(
             completed=completed,
             values=values,
         )
-        await callback.answer()
+        await _answer()
         return
 
-    await callback.answer()
+    await _answer()
 
 
 @shift_router.message(CloseShiftStates.wizard, F.text)
@@ -2546,6 +2670,7 @@ async def close_wizard_text_input(
     state: FSMContext,
     db: Database,
     settings: Settings,
+    bot: Bot,
 ) -> None:
     """Обрабатывает текстовый ввод числовых пунктов мастера закрытия.
 
@@ -2554,6 +2679,7 @@ async def close_wizard_text_input(
         state: FSM-контекст пользователя.
         db: Экземпляр базы данных.
         settings: Настройки приложения.
+        bot: Экземпляр Telegram-бота.
 
     Returns:
         None.
@@ -2688,6 +2814,19 @@ async def close_wizard_text_input(
         values=values,
         started_at=started_at,
     )
+    if len(completed) == close_wizard_total_items():
+        await _close_wizard_finalize(
+            state=state,
+            db=db,
+            settings=settings,
+            bot=bot,
+            force_finish=False,
+            source_message=message,
+            actor_id=message.from_user.id,
+            actor_username=message.from_user.username,
+            actor_full_name=message.from_user.full_name,
+        )
+        return
     await _render_close_wizard_screen(
         source_message=message,
         state=state,
@@ -2704,6 +2843,8 @@ async def close_wizard_media_input(
     message: Message,
     state: FSMContext,
     db: Database,
+    settings: Settings,
+    bot: Bot,
 ) -> None:
     """Принимает обязательные фото для пунктов мастера закрытия.
 
@@ -2711,6 +2852,8 @@ async def close_wizard_media_input(
         message: Входящее сообщение Telegram.
         state: FSM-контекст пользователя.
         db: Экземпляр базы данных.
+        settings: Настройки приложения.
+        bot: Экземпляр Telegram-бота.
 
     Returns:
         None.
@@ -2785,6 +2928,35 @@ async def close_wizard_media_input(
             )
             return
 
+    media_file_id: str | None = None
+    media_file_unique_id: str | None = None
+    media_mime_type: str | None = None
+    if message.photo:
+        largest = message.photo[-1]
+        media_file_id = str(largest.file_id)
+        media_file_unique_id = str(largest.file_unique_id)
+        media_mime_type = "image/jpeg"
+    elif message.document:
+        media_file_id = str(message.document.file_id)
+        media_file_unique_id = str(message.document.file_unique_id)
+        media_mime_type = str(message.document.mime_type or "").strip() or None
+
+    if media_file_id:
+        created_at = (
+            message.date.isoformat()
+            if message.date is not None
+            else datetime.utcnow().replace(microsecond=0).isoformat()
+        )
+        await db.upsert_close_checklist_media(
+            shift_id=shift_id,
+            item_index=item.index,
+            item_label=item.text,
+            file_id=media_file_id,
+            file_unique_id=media_file_unique_id,
+            mime_type=media_mime_type,
+            created_at=created_at,
+        )
+
     completed.add(item.index)
     target_section = _close_wizard_next_section_after_completion(
         current_section=item.section_index,
@@ -2801,6 +2973,19 @@ async def close_wizard_media_input(
         values=values,
         started_at=started_at,
     )
+    if len(completed) == close_wizard_total_items():
+        await _close_wizard_finalize(
+            state=state,
+            db=db,
+            settings=settings,
+            bot=bot,
+            force_finish=False,
+            source_message=message,
+            actor_id=message.from_user.id,
+            actor_username=message.from_user.username,
+            actor_full_name=message.from_user.full_name,
+        )
+        return
     await _render_close_wizard_screen(
         source_message=message,
         state=state,

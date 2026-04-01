@@ -11,7 +11,7 @@ from app.checklist.data import CLOSE_RESIDUAL_INPUTS
 from app.checklist.ui import checklist_total_items
 from app.db import Database
 from app.handlers.constants import MENU_REPORTS
-from app.handlers.utils import safe_edit_text
+from app.handlers.utils import safe_answer_callback, safe_edit_text
 
 
 report_router = Router()
@@ -38,6 +38,21 @@ RESIDUAL_KEY_ORDER = tuple(config["key"] for config in CLOSE_RESIDUAL_INPUTS.val
 
 # Максимальная длина текста inline-кнопки Telegram.
 BUTTON_TEXT_LIMIT = 64
+
+
+async def _answer(
+    callback: CallbackQuery,
+    text: str | None = None,
+    *,
+    show_alert: bool = False,
+) -> None:
+    """Безопасно отвечает на callback-запросы в отчётах."""
+    await safe_answer_callback(
+        callback,
+        text,
+        show_alert=show_alert,
+        log_context="reports callback",
+    )
 
 
 def _short_button_text(text: str, limit: int = BUTTON_TEXT_LIMIT) -> str:
@@ -286,7 +301,7 @@ async def reports_types_callback(
         None.
     """
     if not callback.message:
-        await callback.answer()
+        await _answer(callback)
         return
     await safe_edit_text(
         callback.message,
@@ -294,7 +309,7 @@ async def reports_types_callback(
         reply_markup=_build_report_types_keyboard(),
         log_context="reports types",
     )
-    await callback.answer()
+    await _answer(callback)
 
 
 @report_router.callback_query(F.data.startswith("reports:type:"))
@@ -312,12 +327,12 @@ async def reports_type_callback(
         None.
     """
     if not callback.data or not callback.message:
-        await callback.answer()
+        await _answer(callback)
         return
 
     _, _, report_type = callback.data.split(":", maxsplit=2)
     if report_type not in REPORT_TYPES:
-        await callback.answer("Неизвестный тип отчёта", show_alert=True)
+        await _answer(callback, "Неизвестный тип отчёта", show_alert=True)
         return
 
     dates = await db.get_shift_dates(limit=14)
@@ -332,7 +347,7 @@ async def reports_type_callback(
             ),
             log_context="reports type",
         )
-        await callback.answer()
+        await _answer(callback)
         return
 
     await safe_edit_text(
@@ -341,7 +356,7 @@ async def reports_type_callback(
         reply_markup=_build_dates_keyboard(report_type, dates),
         log_context="reports type",
     )
-    await callback.answer()
+    await _answer(callback)
 
 
 @report_router.callback_query(F.data.startswith("reports:date:"))
@@ -359,17 +374,17 @@ async def reports_date_callback(
         None.
     """
     if not callback.data or not callback.message:
-        await callback.answer()
+        await _answer(callback)
         return
 
     parts = callback.data.split(":")
     if len(parts) != 4:
-        await callback.answer()
+        await _answer(callback)
         return
 
     _, _, report_type, report_date = parts
     if report_type not in REPORT_TYPES:
-        await callback.answer("Неизвестный тип отчёта", show_alert=True)
+        await _answer(callback, "Неизвестный тип отчёта", show_alert=True)
         return
 
     if report_type == "shifts":
@@ -396,7 +411,7 @@ async def reports_date_callback(
                 ),
                 log_context="reports shifts by date",
             )
-            await callback.answer()
+            await _answer(callback)
             return
 
         await safe_edit_text(
@@ -405,7 +420,7 @@ async def reports_date_callback(
             reply_markup=_build_shifts_keyboard(report_date, shifts),
             log_context="reports shifts by date",
         )
-        await callback.answer()
+        await _answer(callback)
         return
 
     if report_type == "residuals":
@@ -437,7 +452,7 @@ async def reports_date_callback(
             ),
             log_context="reports residuals",
         )
-        await callback.answer()
+        await _answer(callback)
         return
 
     shifts = await db.get_shifts_by_date(report_date)
@@ -471,7 +486,7 @@ async def reports_date_callback(
         ),
         log_context="reports checklists",
     )
-    await callback.answer()
+    await _answer(callback)
 
 
 @report_router.callback_query(F.data.startswith("reports:shift:"))
@@ -489,19 +504,19 @@ async def reports_shift_callback(
         None.
     """
     if not callback.data or not callback.message:
-        await callback.answer()
+        await _answer(callback)
         return
 
     parts = callback.data.split(":")
     if len(parts) != 4:
-        await callback.answer()
+        await _answer(callback)
         return
 
     _, _, shift_id_raw, report_date = parts
     try:
         shift_id = int(shift_id_raw)
     except ValueError:
-        await callback.answer("Некорректная смена", show_alert=True)
+        await _answer(callback, "Некорректная смена", show_alert=True)
         return
 
     detail_text = await _build_shift_detail_text(db, shift_id)
@@ -526,4 +541,4 @@ async def reports_shift_callback(
         ),
         log_context="reports shift details",
     )
-    await callback.answer()
+    await _answer(callback)

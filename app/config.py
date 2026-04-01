@@ -8,15 +8,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-# Значение модели OpenRouter по умолчанию.
-DEFAULT_AI_MODEL = "openrouter/free"
-
-# Ограничение длины входного AI-текста по умолчанию.
-DEFAULT_AI_MAX_INPUT_CHARS = 1000
-
-# Таймаут AI-запроса в секундах по умолчанию.
-DEFAULT_AI_REQUEST_TIMEOUT_SEC = 45
-
 # Путь до SQLite-файла по умолчанию.
 DEFAULT_DB_PATH = "data/shifts.db"
 
@@ -40,38 +31,11 @@ class Settings:
     bot_token: str
     owner_id: int
     work_chat_id: int
-    openrouter_api_key: str
-    ai_model: str
-    ai_max_input_chars: int
-    ai_request_timeout_sec: int
     db_path: Path
     log_dir: Path
     timezone: str
     shift_open_time: time
     shift_close_time: time
-
-
-def _parse_positive_int(raw: str, *, var_name: str, default: int) -> int:
-    """Преобразует строку в положительное целое число.
-
-    Args:
-        raw: Входное строковое значение.
-        var_name: Имя переменной окружения для текста ошибки.
-        default: Значение по умолчанию, если входная строка пустая.
-
-    Returns:
-        Положительное целое число.
-    """
-    text = raw.strip()
-    if not text:
-        return default
-    try:
-        value = int(text)
-    except ValueError as exc:
-        raise RuntimeError(f"{var_name} must be an integer") from exc
-    if value <= 0:
-        raise RuntimeError(f"{var_name} must be > 0")
-    return value
 
 
 def _parse_time_hhmm(raw: str, *, var_name: str, default: str) -> time:
@@ -106,8 +70,6 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
     bot_token = os.getenv("BOT_TOKEN", "").strip()
     owner_id_raw = os.getenv("OWNER_ID", "").strip()
     work_chat_id_raw = os.getenv("WORK_CHAT_ID", "").strip()
-    openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-    ai_model = os.getenv("AI_MODEL", DEFAULT_AI_MODEL).strip()
 
     if not bot_token:
         raise RuntimeError("BOT_TOKEN is not set in .env")
@@ -127,17 +89,6 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
         except ValueError as exc:
             raise RuntimeError("WORK_CHAT_ID must be an integer Telegram chat id") from exc
 
-    ai_max_input_chars = _parse_positive_int(
-        os.getenv("AI_MAX_INPUT_CHARS", str(DEFAULT_AI_MAX_INPUT_CHARS)),
-        var_name="AI_MAX_INPUT_CHARS",
-        default=DEFAULT_AI_MAX_INPUT_CHARS,
-    )
-    ai_request_timeout_sec = _parse_positive_int(
-        os.getenv("AI_REQUEST_TIMEOUT_SEC", str(DEFAULT_AI_REQUEST_TIMEOUT_SEC)),
-        var_name="AI_REQUEST_TIMEOUT_SEC",
-        default=DEFAULT_AI_REQUEST_TIMEOUT_SEC,
-    )
-
     db_path = Path(os.getenv("DB_PATH", DEFAULT_DB_PATH)).expanduser()
     log_dir = Path(os.getenv("LOG_DIR", DEFAULT_LOG_DIR)).expanduser()
     timezone = os.getenv("BOT_TIMEZONE", DEFAULT_TIMEZONE)
@@ -156,10 +107,6 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
         bot_token=bot_token,
         owner_id=owner_id,
         work_chat_id=work_chat_id,
-        openrouter_api_key=openrouter_api_key,
-        ai_model=ai_model,
-        ai_max_input_chars=ai_max_input_chars,
-        ai_request_timeout_sec=ai_request_timeout_sec,
         db_path=db_path,
         log_dir=log_dir,
         timezone=timezone,

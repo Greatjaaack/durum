@@ -139,6 +139,14 @@ def _normalize_residual_inputs(raw: object) -> dict[str, dict[str, object]]:
         key = str(config_raw.get("key", "")).strip()
         prompt = str(config_raw.get("prompt", "")).strip()
         unit = str(config_raw.get("unit", "")).strip()
+        checklist_item_raw = config_raw.get("checklist_item")
+        checklist_item = (
+            str(checklist_item_raw).strip()
+            if isinstance(checklist_item_raw, str)
+            else ""
+        )
+        if not checklist_item:
+            checklist_item = item_label
         stock_item_raw = config_raw.get("stock_item")
         stock_item = str(stock_item_raw).strip() if isinstance(stock_item_raw, str) else None
         stock_item = stock_item or None
@@ -153,6 +161,7 @@ def _normalize_residual_inputs(raw: object) -> dict[str, dict[str, object]]:
             "key": key,
             "prompt": prompt,
             "unit": unit,
+            "checklist_item": checklist_item,
             "stock_item": stock_item,
         }
 
@@ -186,6 +195,13 @@ CLOSE_SECTION_EMOJI_BY_TITLE = _normalize_emoji_map(
 CLOSE_RESIDUAL_INPUTS = _normalize_residual_inputs(
     _RAW_CONFIG.get("close_residual_inputs"),
 )
+CLOSE_RESIDUAL_INPUTS_BY_CHECKLIST_ITEM = {
+    checklist_item: config
+    for item_label, config in CLOSE_RESIDUAL_INPUTS.items()
+    if (
+        checklist_item := str(config.get("checklist_item") or item_label).strip()
+    )
+}
 
 CHECKLISTS = {
     "open": OPEN_CHECKLIST,
@@ -196,7 +212,7 @@ CHECKLISTS = {
 CHECKLIST_TITLES = _normalize_titles(_RAW_CONFIG.get("checklist_titles"))
 
 CLOSE_RESIDUAL_LABELS_BY_KEY = {
-    str(config["key"]): item_label
+    str(config["key"]): str(config.get("checklist_item") or item_label)
     for item_label, config in CLOSE_RESIDUAL_INPUTS.items()
 }
 CLOSE_RESIDUAL_UNITS_BY_KEY = {

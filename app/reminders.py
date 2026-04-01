@@ -78,6 +78,7 @@ def setup_scheduler(
     """
     timezone = ZoneInfo(settings.timezone)
     scheduler = AsyncIOScheduler(timezone=timezone)
+    open_total_items = checklist_total_items("open")
     close_total_items = checklist_total_items("close")
     opening_deadline_hour, opening_deadline_minute = _time_with_offset(
         settings.shift_open_time,
@@ -93,6 +94,16 @@ def setup_scheduler(
         offset_minutes=CLOSE_CHECKLIST_SECOND_REMINDER_OFFSET_MIN,
     )
 
+    def _current_shift_date() -> str:
+        """Возвращает текущую дату смены в часовом поясе приложения."""
+        return datetime.now(timezone).date().isoformat()
+
+    async def _get_active_shifts_for_current_date() -> list[dict[str, object]]:
+        """Возвращает активные смены только за текущую дату."""
+        shift_date = _current_shift_date()
+        active_shifts = await db.get_active_shifts()
+        return [shift for shift in active_shifts if str(shift.get("date")) == shift_date]
+
     async def _send_to_active_employees(text: str) -> None:
         """Отправляет уведомление всем сотрудникам с открытой сменой.
 
@@ -102,8 +113,15 @@ def setup_scheduler(
         Returns:
             None.
         """
-        employee_ids = await db.get_active_employee_ids()
-        for employee_id in employee_ids:
+        active_shifts = await _get_active_shifts_for_current_date()
+        employee_ids: set[int] = set()
+        for shift in active_shifts:
+            try:
+                employee_ids.add(int(shift["employee_id"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+
+        for employee_id in sorted(employee_ids):
             try:
                 await bot.send_message(employee_id, text)
             except Exception:
@@ -141,7 +159,10 @@ def setup_scheduler(
             None.
         """
         shift_date = datetime.now(timezone).date().isoformat()
-        has_opened = await db.has_shift_opened_on(shift_date)
+        has_opened = await db.has_shift_opened_on(
+            shift_date,
+            open_checklist_total=open_total_items,
+        )
         if has_opened:
             return
         try:
@@ -161,7 +182,7 @@ def setup_scheduler(
         Returns:
             True, если найден незавершённый чек-лист.
         """
-        active_shifts = await db.get_active_shifts()
+        active_shifts = await _get_active_shifts_for_current_date()
         if not active_shifts:
             return False
 

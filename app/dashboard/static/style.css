@@ -248,6 +248,32 @@ tr.warn {
   min-width: 160px;
 }
 
+.media-cell {
+  min-width: 168px;
+}
+
+.media-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.media-thumb {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  background: #f0f4fb;
+}
+
+.media-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 @media (max-width: 1280px) {
   .kpi-grid {
     grid-template-columns: repeat(3, minmax(130px, 1fr));
@@ -298,5 +324,12 @@ tr.warn {
   }
   .status-details {
     display: none;
+  }
+  .media-cell {
+    min-width: 120px;
+  }
+  .media-thumb {
+    width: 36px;
+    height: 36px;
   }
 }

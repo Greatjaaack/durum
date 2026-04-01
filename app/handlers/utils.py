@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
+from aiogram.types import CallbackQuery, KeyboardButton, Message, ReplyKeyboardMarkup
 
 from app.config import Settings
 from app.units_config import parse_mixed_number
@@ -185,6 +185,44 @@ async def safe_edit_text(
     except TelegramBadRequest as error:
         if "message is not modified" in str(error).lower():
             logger.info("Skipped %s edit: no changes", log_context)
+            return
+        raise
+
+
+async def safe_answer_callback(
+    callback: CallbackQuery,
+    text: str | None = None,
+    *,
+    show_alert: bool = False,
+    log_context: str = "callback",
+) -> None:
+    """Безопасно отвечает на callback-запрос.
+
+    Игнорирует ошибку Telegram `query is too old`, которая возникает
+    после сетевых сбоев/переподключений или при повторных кликах по старым кнопкам.
+
+    Args:
+        callback: Callback-запрос Telegram.
+        text: Текст уведомления или None.
+        show_alert: Показать alert-окно вместо toast.
+        log_context: Короткая метка контекста для лога.
+
+    Returns:
+        None.
+    """
+    try:
+        if text is None:
+            await callback.answer()
+        else:
+            await callback.answer(text, show_alert=show_alert)
+    except TelegramBadRequest as error:
+        lowered = str(error).lower()
+        if (
+            "query is too old" in lowered
+            or "query id is invalid" in lowered
+            or "response timeout expired" in lowered
+        ):
+            logger.info("Skipped %s callback answer: stale query", log_context)
             return
         raise
 
