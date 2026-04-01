@@ -14,7 +14,7 @@ from app.checklist.ui import (
     normalize_checklist_section,
 )
 from app.db import Database
-from app.handlers.utils import build_shift_menu_keyboard, safe_edit_text
+from app.handlers.utils import build_shift_menu_keyboard, safe_answer_callback, safe_edit_text
 
 
 shift_checklist_router = Router()
@@ -96,19 +96,27 @@ async def checklist_callback(
     if not callback.data or not callback.message or not callback.from_user:
         return
 
+    async def _answer(text: str | None = None, *, show_alert: bool = False) -> None:
+        await safe_answer_callback(
+            callback,
+            text,
+            show_alert=show_alert,
+            log_context="shift checklist",
+        )
+
     payload = parse_checklist_callback(callback.data)
     if payload is None:
-        await callback.answer()
+        await _answer()
         return
 
     checklist_type = payload.checklist_type
     action = payload.action
 
     if checklist_type not in CHECKLISTS:
-        await callback.answer("Неизвестный чек-лист", show_alert=True)
+        await _answer("Неизвестный чек-лист", show_alert=True)
         return
     if checklist_type == "close":
-        await callback.answer(
+        await _answer(
             "Закрытие смены работает в отдельном сценарии. Используйте /close.",
             show_alert=True,
         )
@@ -127,7 +135,7 @@ async def checklist_callback(
         shift_id = payload.shift_id
 
     if shift_id is None:
-        await callback.answer(
+        await _answer(
             "Этот чек-лист устарел. Откройте актуальный через /open или /mid.",
             show_alert=True,
         )
@@ -160,7 +168,7 @@ async def checklist_callback(
 
         checklist_len = checklist_total_items(checklist_type)
         if index < 0 or index >= checklist_len:
-            await callback.answer("Некорректный пункт", show_alert=True)
+            await _answer("Некорректный пункт", show_alert=True)
             return
 
         if index in completed:
@@ -192,7 +200,7 @@ async def checklist_callback(
                     active_section + 1,
                 )
     else:
-        await callback.answer()
+        await _answer()
         return
 
     await state.set_state(None)
@@ -234,7 +242,7 @@ async def checklist_callback(
                 ),
                 log_context="shift checklist",
             )
-            await callback.answer("Чек-лист завершён.")
+            await _answer("Чек-лист завершён.")
             if just_completed:
                 await callback.message.answer("✅ Чек-лист ведения смены завершён.")
             return
@@ -245,7 +253,7 @@ async def checklist_callback(
                 checklist_text,
                 log_context="shift checklist",
             )
-            await callback.answer("Чек-лист завершён.")
+            await _answer("Чек-лист завершён.")
             await state.clear()
             await callback.message.answer(
                 "Смена открыта ✅",
@@ -258,7 +266,7 @@ async def checklist_callback(
             checklist_text,
             log_context="shift checklist",
         )
-        await callback.answer("Чек-лист завершён.")
+        await _answer("Чек-лист завершён.")
         return
 
     await safe_edit_text(
@@ -272,4 +280,4 @@ async def checklist_callback(
         ),
         log_context="shift checklist",
     )
-    await callback.answer()
+    await _answer()

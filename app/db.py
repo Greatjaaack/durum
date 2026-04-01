@@ -228,19 +228,6 @@ class Database:
             UNIQUE(shift_id, item_index)
         );
 
-        CREATE TABLE IF NOT EXISTS food_facts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fact TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS ai_state (
-            user_id INTEGER PRIMARY KEY,
-            enabled INTEGER NOT NULL DEFAULT 0,
-            history TEXT NOT NULL DEFAULT '[]',
-            updated_at TEXT NOT NULL
-        );
-
         CREATE INDEX IF NOT EXISTS idx_shifts_employee_id ON shifts(employee_id);
         CREATE INDEX IF NOT EXISTS idx_shifts_date ON shifts(date);
         CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(date);
@@ -249,7 +236,6 @@ class Database:
         CREATE INDEX IF NOT EXISTS idx_close_residuals_shift ON close_residuals(shift_id);
         CREATE INDEX IF NOT EXISTS idx_close_residuals_date ON close_residuals(date);
         CREATE INDEX IF NOT EXISTS idx_close_checklist_media_shift ON close_checklist_media(shift_id);
-        CREATE INDEX IF NOT EXISTS idx_food_facts_created_at ON food_facts(created_at);
         """
         await asyncio.to_thread(self._execute_script, schema)
         await asyncio.to_thread(self._ensure_shift_status_column)
@@ -802,18 +788,45 @@ class Database:
         rows = await asyncio.to_thread(self._fetchall, query)
         return [int(row["employee_id"]) for row in rows]
 
-    async def has_shift_opened_on(self, shift_date: str) -> bool:
-        """Проверяет, была ли открыта смена в указанную дату.
+    async def has_shift_opened_on(
+        self,
+        shift_date: str,
+        *,
+        open_checklist_total: int | None = None,
+    ) -> bool:
+        """Проверяет, была ли реально открыта смена в указанную дату.
 
         Args:
             shift_date: Дата в формате YYYY-MM-DD.
+            open_checklist_total: Если задано, требует завершённый open-чек-лист
+                минимум на указанное количество пунктов.
 
         Returns:
-            True, если запись смены найдена.
+            True, если смена считается открытой.
         """
-        query = "SELECT 1 FROM shifts WHERE date = ? LIMIT 1"
-        row = await asyncio.to_thread(self._fetchone, query, (shift_date,))
-        return row is not None
+        if open_checklist_total is None or open_checklist_total <= 0:
+            query = "SELECT 1 FROM shifts WHERE date = ? LIMIT 1"
+            row = await asyncio.to_thread(self._fetchone, query, (shift_date,))
+            return row is not None
+
+        rows = await asyncio.to_thread(
+            self._fetchall,
+            "SELECT id FROM shifts WHERE date = ? ORDER BY id DESC",
+            (shift_date,),
+        )
+        for row in rows:
+            try:
+                shift_id = int(row["id"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            open_state = await self.get_checklist_state(
+                shift_id=shift_id,
+                checklist_type="open",
+            )
+            done_items = len(open_state["completed"]) if open_state else 0
+            if done_items >= open_checklist_total:
+                return True
+        return False
 
     async def get_shifts_by_date(self, shift_date: str) -> list[dict[str, Any]]:
         """Возвращает все смены за указанную дату.
@@ -994,175 +1007,6 @@ class Database:
             return float(value)
         except (TypeError, ValueError):
             return None
-
-    async def save_food_fact(self, *, fact: str, created_at: str) -> int:
-        """Сохраняет факт о еде.
-
-        Args:
-            fact: Текст факта.
-            created_at: Дата и время создания.
-
-        Returns:
-            Идентификатор записи факта.
-        """
-        query = """
-        INSERT INTO food_facts (fact, created_at)
-        VALUES (?, ?)
-        """
-        return await asyncio.to_thread(self._execute, query, (fact, created_at))
-
-    async def get_latest_food_fact(self) -> dict[str, Any] | None:
-        """Возвращает последний сохранённый факт о еде.
-
-        Args:
-            Нет параметров.
-
-        Returns:
-            Словарь факта или None.
-        """
-        query = """
-        SELECT id, fact, created_at
-        FROM food_facts
-        ORDER BY id DESC
-        LIMIT 1
-        """
-        return await asyncio.to_thread(self._fetchone, query)
-
-    async def get_recent_food_facts(
-        self,
-        limit: int = 10,
-    ) -> list[str]:
-        """Возвращает последние факты о еде.
-
-        Args:
-            limit: Максимальное число фактов.
-
-        Returns:
-            Список текстов фактов (от новых к старым).
-        """
-        safe_limit = max(1, min(int(limit), 50))
-        query = """
-        SELECT fact
-        FROM food_facts
-        ORDER BY id DESC
-        LIMIT ?
-        """
-        rows = await asyncio.to_thread(self._fetchall, query, (safe_limit,))
-        result: list[str] = []
-        for row in rows:
-            fact = str(row.get("fact") or "").strip()
-            if fact:
-                result.append(fact)
-        return result
-
-    async def get_ai_state(self, user_id: int) -> dict[str, Any]:
-        """Возвращает состояние AI-режима пользователя.
-
-        Args:
-            user_id: Telegram ID пользователя.
-
-        Returns:
-            Словарь со статусом режима и историей.
-        """
-        query = """
-        SELECT enabled, history, updated_at
-        FROM ai_state
-        WHERE user_id = ?
-        LIMIT 1
-        """
-        row = await asyncio.to_thread(self._fetchone, query, (user_id,))
-        if not row:
-            return {"enabled": False, "history": []}
-
-        enabled = bool(int(row.get("enabled", 0)))
-        history_raw = row.get("history", "[]")
-        try:
-            history_data = json.loads(history_raw)
-        except (TypeError, json.JSONDecodeError):
-            history_data = []
-
-        history: list[dict[str, str]] = []
-        if isinstance(history_data, list):
-            for item in history_data:
-                if not isinstance(item, dict):
-                    continue
-                role = str(item.get("role", "")).strip()
-                text = str(item.get("text", "")).strip()
-                if role not in {"user", "assistant"} or not text:
-                    continue
-                history.append({"role": role, "text": text})
-
-        return {"enabled": enabled, "history": history}
-
-    async def save_ai_state(
-        self,
-        *,
-        user_id: int,
-        enabled: bool,
-        history: list[dict[str, str]],
-        updated_at: str,
-    ) -> None:
-        """Сохраняет состояние AI-режима пользователя.
-
-        Args:
-            user_id: Telegram ID пользователя.
-            enabled: Признак включённого AI-режима.
-            history: История сообщений.
-            updated_at: Дата и время обновления.
-
-        Returns:
-            None.
-        """
-        sanitized_history: list[dict[str, str]] = []
-        for item in history:
-            if not isinstance(item, dict):
-                continue
-            role = str(item.get("role", "")).strip()
-            text = str(item.get("text", "")).strip()
-            if role not in {"user", "assistant"} or not text:
-                continue
-            sanitized_history.append({"role": role, "text": text})
-
-        query = """
-        INSERT INTO ai_state (user_id, enabled, history, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE
-        SET enabled = excluded.enabled,
-            history = excluded.history,
-            updated_at = excluded.updated_at
-        """
-        await asyncio.to_thread(
-            self._execute,
-            query,
-            (
-                user_id,
-                1 if enabled else 0,
-                json.dumps(sanitized_history, ensure_ascii=False),
-                updated_at,
-            ),
-        )
-
-    async def set_ai_enabled(self, *, user_id: int, enabled: bool, updated_at: str) -> None:
-        """Обновляет только флаг включения AI-режима.
-
-        Args:
-            user_id: Telegram ID пользователя.
-            enabled: Новый статус AI-режима.
-            updated_at: Дата и время обновления.
-
-        Returns:
-            None.
-        """
-        state = await self.get_ai_state(user_id)
-        history = state.get("history", [])
-        if not isinstance(history, list):
-            history = []
-        await self.save_ai_state(
-            user_id=user_id,
-            enabled=enabled,
-            history=history,
-            updated_at=updated_at,
-        )
 
     async def close(self) -> None:
         """Закрывает подключение к базе данных.

@@ -51,7 +51,10 @@ def _item_button_text(
     item_limit = max(4, limit - len(suffix))
     compact = item_text.strip()
     if len(compact) > item_limit:
-        compact = compact[:item_limit].rstrip()
+        if item_limit <= 3:
+            compact = compact[:item_limit]
+        else:
+            compact = compact[: item_limit - 3].rstrip() + "..."
     return f"{compact}{suffix}"
 
 

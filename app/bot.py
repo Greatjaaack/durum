@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
-from app.ai_client import OpenRouterClient
 from app.config import load_settings
 from app.db import Database
 from app.handlers import router
 from app.logging_setup import configure_logging
 from app.reminders import setup_scheduler
+
+
+logger = logging.getLogger(__name__)
 
 
 async def set_commands(bot: Bot) -> None:
@@ -27,16 +31,12 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="open", description="Открыть смену"),
         BotCommand(command="mid", description="Чек-лист ведения смены"),
         BotCommand(command="close", description="Закрыть смену"),
-        BotCommand(command="stock", description="Ввод остатков"),
-        BotCommand(command="problem", description="Сообщение о проблеме"),
-        BotCommand(command="report", description="Отчёт за дату"),
-        BotCommand(command="reports", description="Интерактивные отчёты"),
-        BotCommand(command="fact", description="Последний факт о еде"),
-        BotCommand(command="ai", description="Включить AI режим"),
-        BotCommand(command="stop", description=" AI режим"),
-        BotCommand(command="cancel", description="Отменить текущее действие"),
     ]
-    await bot.set_my_commands(commands)
+    try:
+        await bot.set_my_commands(commands)
+    except TelegramNetworkError:
+        # Команды можно выставить позже, это не должно останавливать запуск бота.
+        logger.warning("Failed to set bot commands due to Telegram network error")
 
 
 async def main() -> None:
@@ -52,11 +52,6 @@ async def main() -> None:
     configure_logging(settings.log_dir, settings.timezone)
     db = Database(settings.db_path)
     await db.init()
-    ai_client = OpenRouterClient(
-        api_key=settings.openrouter_api_key,
-        model=settings.ai_model,
-        timeout_sec=settings.ai_request_timeout_sec,
-    )
 
     bot = Bot(token=settings.bot_token)
     dispatcher = Dispatcher(storage=MemoryStorage())
@@ -64,13 +59,18 @@ async def main() -> None:
 
     dispatcher["db"] = db
     dispatcher["settings"] = settings
-    dispatcher["ai_client"] = ai_client
 
     scheduler = setup_scheduler(bot, db, settings)
     scheduler.start()
     try:
-        await set_commands(bot)
-        await dispatcher.start_polling(bot)
+        while True:
+            try:
+                await set_commands(bot)
+                await dispatcher.start_polling(bot)
+                break
+            except TelegramNetworkError:
+                logger.warning("Polling startup failed due to Telegram network error; retrying in 5s")
+                await asyncio.sleep(5)
     finally:
         scheduler.shutdown(wait=False)
         await db.close()
