@@ -72,7 +72,7 @@ async def main() -> None:
                 logger.warning("Polling startup failed due to Telegram network error; retrying in 5s")
                 await asyncio.sleep(5)
     finally:
-        scheduler.shutdown(wait=False)
+        scheduler.shutdown(wait=True)
         await db.close()
         await bot.session.close()
 

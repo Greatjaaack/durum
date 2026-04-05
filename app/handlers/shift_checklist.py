@@ -203,7 +203,6 @@ async def checklist_callback(
         await _answer()
         return
 
-    await state.set_state(None)
     completed_sorted = sorted(completed)
     await state.update_data(
         {
@@ -244,6 +243,7 @@ async def checklist_callback(
             )
             await _answer("Чек-лист завершён.")
             if just_completed:
+                await state.clear()
                 await callback.message.answer("✅ Чек-лист ведения смены завершён.")
             return
 

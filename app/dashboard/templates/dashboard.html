@@ -16,7 +16,11 @@
   </form>
 </section>
 
-{% if not shifts and not residuals and not employees %}
+{% if error %}
+<section class="card empty-state">
+  <p>⚠️ {{ error }}</p>
+</section>
+{% elif not shifts and not residuals and not employees %}
 <section class="card empty-state">
   <p>Нет данных за выбранный период</p>
 </section>

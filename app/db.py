@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sqlite3
 import threading
 from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 from app.db_schema import (
+    close_stale_open_shifts as close_stale_open_shifts_schema,
     ensure_close_residual_columns as ensure_close_residual_schema_columns,
     ensure_shift_audit_columns as ensure_shift_audit_schema_columns,
     ensure_shift_status_column as ensure_shift_status_schema_column,
@@ -135,6 +139,18 @@ class Database:
         with self._lock:
             ensure_shift_status_schema_index(self._conn)
 
+    def _close_stale_open_shifts(self) -> None:
+        """Закрывает брошенные OPEN-смены с прошедшей датой.
+
+        Args:
+            Нет параметров.
+
+        Returns:
+            None.
+        """
+        with self._lock:
+            close_stale_open_shifts_schema(self._conn)
+
     async def init(self) -> None:
         """Инициализирует схему базы данных и миграции.
 
@@ -242,6 +258,7 @@ class Database:
         await asyncio.to_thread(self._ensure_shift_audit_columns)
         await asyncio.to_thread(self._ensure_close_residual_columns)
         await asyncio.to_thread(self._ensure_shift_status_index)
+        await asyncio.to_thread(self._close_stale_open_shifts)
 
     async def create_shift(
         self,
@@ -305,15 +322,27 @@ class Database:
         """
         return await asyncio.to_thread(self._fetchone, query, (employee_id,))
 
-    async def get_active_shifts(self) -> list[dict[str, Any]]:
-        """Возвращает список всех активных смен.
+    async def get_active_shifts(
+        self,
+        *,
+        shift_date: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Возвращает список активных смен, опционально фильтруя по дате.
 
         Args:
-            Нет параметров.
+            shift_date: Дата в формате YYYY-MM-DD; если None — все активные смены.
 
         Returns:
             Список активных смен.
         """
+        if shift_date is not None:
+            query = """
+            SELECT *
+            FROM shifts
+            WHERE (status = 'OPEN' OR close_time IS NULL) AND date = ?
+            ORDER BY id ASC
+            """
+            return await asyncio.to_thread(self._fetchall, query, (shift_date,))
         query = """
         SELECT *
         FROM shifts
@@ -351,6 +380,12 @@ class Database:
         try:
             completed_data = json.loads(completed_raw)
         except (TypeError, json.JSONDecodeError):
+            logger.error(
+                "Corrupted checklist JSON for shift_id=%s type=%s: %r",
+                shift_id,
+                checklist_type,
+                completed_raw,
+            )
             completed_data = []
 
         completed: list[int] = []
@@ -663,45 +698,49 @@ class Database:
         Returns:
             Расход мяса или None, если стартовое значение отсутствует.
         """
-        shift = await asyncio.to_thread(
-            self._fetchone, "SELECT meat_start FROM shifts WHERE id = ?", (shift_id,)
-        )
-        meat_start = shift["meat_start"] if shift else None
-        meat_used = round(meat_start - meat_end, 3) if meat_start is not None else None
+        def _close_shift_atomic() -> float | None:
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT meat_start FROM shifts WHERE id = ?", (shift_id,)
+                ).fetchone()
+                meat_start = row["meat_start"] if row else None
+                meat_used_val = (
+                    round(meat_start - meat_end, 3) if meat_start is not None else None
+                )
+                self._conn.execute(
+                    """
+                    UPDATE shifts
+                    SET close_time = ?,
+                        closed_at = ?,
+                        status = 'CLOSED',
+                        revenue = ?,
+                        photo = ?,
+                        meat_end = ?,
+                        meat_used = ?,
+                        lavash_end = ?,
+                        closed_by_id = ?,
+                        closed_by_name = ?,
+                        close_duration_sec = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        close_time,
+                        close_time,
+                        revenue,
+                        photo,
+                        meat_end,
+                        meat_used_val,
+                        lavash_end,
+                        closed_by_id,
+                        closed_by_name,
+                        close_duration_sec,
+                        shift_id,
+                    ),
+                )
+                self._conn.commit()
+                return meat_used_val
 
-        query = """
-        UPDATE shifts
-        SET close_time = ?,
-            closed_at = ?,
-            status = 'CLOSED',
-            revenue = ?,
-            photo = ?,
-            meat_end = ?,
-            meat_used = ?,
-            lavash_end = ?,
-            closed_by_id = ?,
-            closed_by_name = ?,
-            close_duration_sec = ?
-        WHERE id = ?
-        """
-        await asyncio.to_thread(
-            self._execute,
-            query,
-            (
-                close_time,
-                close_time,
-                revenue,
-                photo,
-                meat_end,
-                meat_used,
-                lavash_end,
-                closed_by_id,
-                closed_by_name,
-                close_duration_sec,
-                shift_id,
-            ),
-        )
-        return meat_used
+        return await asyncio.to_thread(_close_shift_atomic)
 
     async def save_order(
         self,
@@ -902,6 +941,12 @@ class Database:
             try:
                 completed_data = json.loads(str(completed_raw))
             except (TypeError, ValueError, json.JSONDecodeError):
+                logger.error(
+                    "Corrupted checklist JSON in completion count shift_id=%s type=%s: %r",
+                    shift_id,
+                    checklist_type,
+                    completed_raw,
+                )
                 completed_data = []
             if isinstance(completed_data, list):
                 result[checklist_type] = len(

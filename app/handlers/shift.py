@@ -788,6 +788,22 @@ async def close_shift_start(
         return
 
     shift_id = int(active_shift["id"])
+    open_state = await db.get_checklist_state(
+        shift_id=shift_id,
+        checklist_type="open",
+    )
+    open_done = len(open_state["completed"]) if open_state else 0
+    open_total = checklist_total_items("open")
+    if open_done < open_total:
+        remaining = max(0, open_total - open_done)
+        await state.clear()
+        await message.answer(
+            "Нельзя закрыть смену, пока не завершён чек-лист открытия.\n"
+            f"Осталось: {remaining} {_close_wizard_count_suffix(remaining)}."
+        )
+        await _start_checklist(message, state, db, "open", shift_id)
+        return
+
     now = now_local(settings)
     started_at_raw = str(active_shift.get("close_started_at") or "").strip()
     started_at = started_at_raw or now.isoformat(timespec="seconds")
@@ -978,6 +994,48 @@ def _close_wizard_count_suffix(
     return "пунктов"
 
 
+def _close_wizard_missing_items(
+    completed: set[int],
+) -> list[CloseWizardItem]:
+    """Возвращает список незавершённых пунктов мастера.
+
+    Args:
+        completed: Выполненные пункты.
+
+    Returns:
+        Список незавершённых пунктов в порядке чек-листа.
+    """
+    return [item for item in CLOSE_WIZARD_ITEMS if item.index not in completed]
+
+
+def _close_wizard_missing_items_preview(
+    completed: set[int],
+    *,
+    limit: int = 5,
+) -> str:
+    """Строит краткую подсказку по пропущенным пунктам.
+
+    Args:
+        completed: Выполненные пункты.
+        limit: Максимум отображаемых пунктов.
+
+    Returns:
+        Текст-подсказка со списком пропусков.
+    """
+    missing_items = _close_wizard_missing_items(completed)
+    if not missing_items:
+        return ""
+
+    lines = ["Нужно выполнить:"]
+    for item in missing_items[: max(1, limit)]:
+        lines.append(f"• Блок {item.section_index + 1}: {item.text}")
+
+    remaining = len(missing_items) - max(1, limit)
+    if remaining > 0:
+        lines.append(f"И ещё {remaining} {_close_wizard_count_suffix(remaining)}.")
+    return "\n".join(lines)
+
+
 def _close_wizard_block_screen(
     *,
     section_index: int,
@@ -1062,20 +1120,19 @@ def _close_wizard_finish_warning_screen(
     total = close_wizard_total_items()
     done = len(completed)
     remaining = max(0, total - done)
+    missing_preview = _close_wizard_missing_items_preview(completed)
     text = (
         "Вы не завершили все пункты\n\n"
         f"Осталось: {remaining} {_close_wizard_count_suffix(remaining)}"
     )
+    if missing_preview:
+        text = f"{text}\n\n{missing_preview}"
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Вернуться",
+                    text="К пропущенным пунктам",
                     callback_data=f"{CLOSE_WIZARD_CALLBACK_PREFIX}:finish_return",
-                ),
-                InlineKeyboardButton(
-                    text="Закрыть всё равно",
-                    callback_data=f"{CLOSE_WIZARD_CALLBACK_PREFIX}:finish_force",
                 ),
             ]
         ]
@@ -1810,7 +1867,6 @@ async def _close_wizard_finalize(
     settings: Settings,
     bot: Bot,
     *,
-    force_finish: bool = False,
     callback: CallbackQuery | None = None,
     source_message: Message | None = None,
     actor_id: int | None = None,
@@ -1824,7 +1880,6 @@ async def _close_wizard_finalize(
         db: Экземпляр базы данных.
         settings: Настройки приложения.
         bot: Экземпляр Telegram-бота.
-        force_finish: Разрешает закрытие при незаполненных пунктах.
         callback: Callback-запрос Telegram (если финализация вызвана из кнопки).
         source_message: Сообщение-источник (если финализация вызвана не из callback).
         actor_id: Telegram ID сотрудника.
@@ -1879,7 +1934,10 @@ async def _close_wizard_finalize(
         return False
 
     total = close_wizard_total_items()
-    if len(completed) < total and not force_finish:
+    if len(completed) < total:
+        first_missing = close_wizard_first_incomplete_index(completed)
+        if first_missing < total:
+            active_section = close_wizard_section_for_index(first_missing)
         await _persist_close_wizard_progress(
             state=state,
             db=db,
@@ -1900,12 +1958,15 @@ async def _close_wizard_finalize(
             completed=completed,
             values=values,
         )
-        await _respond("Вы не завершили все пункты", show_alert=True)
+        await _respond(
+            "Нельзя закрыть смену, пока не завершены все пункты чек-листа.",
+            show_alert=True,
+        )
         return False
 
     residuals = await db.get_close_residuals(shift_id)
     missing_residual_keys = [key for key in CLOSE_REQUIRED_RESIDUAL_KEYS if key not in residuals]
-    if missing_residual_keys and not force_finish:
+    if missing_residual_keys:
         missing_label = CLOSE_RESIDUAL_LABELS.get(missing_residual_keys[0], missing_residual_keys[0])
         target_index = _close_wizard_item_index_by_residual_key(missing_residual_keys[0])
         if target_index is not None:
@@ -1937,27 +1998,59 @@ async def _close_wizard_finalize(
         await _respond(f"Вы не заполнили остаток: {missing_label}", show_alert=True)
         return False
 
-    if missing_residual_keys and force_finish:
-        for item_key in missing_residual_keys:
-            item_index = _close_wizard_item_index_by_residual_key(item_key)
-            if item_index is None:
-                continue
-            item = close_wizard_item_by_index(item_index)
-            if not item or item.item_type != "input":
-                continue
-            await _close_wizard_store_input(
-                db=db,
-                settings=settings,
-                employee=employee,
-                employee_id=actor_id,
-                shift_id=shift_id,
-                item=item,
-                display_value=0.0,
-            )
-            if item.residual_key:
-                values[item.residual_key] = 0.0
-        residuals = await db.get_close_residuals(shift_id)
+    try:
+        return await _close_wizard_finalize_inner(
+            state=state,
+            db=db,
+            settings=settings,
+            bot=bot,
+            source_message=source_message,
+            actor_id=actor_id,
+            employee=employee,
+            shift_id=shift_id,
+            completed=completed,
+            active_section=active_section,
+            selected_item_index=selected_item_index,
+            values=values,
+            started_at=started_at,
+            residuals=residuals,
+            _respond=_respond,
+        )
+    except Exception:
+        logger.exception(
+            "Unexpected error during shift close finalization shift_id=%s actor_id=%s",
+            shift_id,
+            actor_id,
+        )
+        await _respond(
+            "Произошла ошибка при закрытии смены. Попробуйте ещё раз или обратитесь к администратору.",
+            show_alert=True,
+        )
+        return False
 
+
+async def _close_wizard_finalize_inner(
+    state: FSMContext,
+    db: Database,
+    settings: Settings,
+    bot: Bot,
+    *,
+    source_message: Message,
+    actor_id: int,
+    employee: str,
+    shift_id: int,
+    completed: list[int],
+    active_section: int,
+    selected_item_index: int | None,
+    values: dict[str, object],
+    started_at: str | None,
+    residuals: dict,
+    _respond,
+) -> bool:
+    """Выполняет фактическую финализацию закрытия смены.
+
+    Вызывается из _close_wizard_finalize после извлечения контекста и валидации.
+    """
     now = now_local(settings)
     shift = await db.get_shift_by_id(shift_id)
     started_at_value = (
@@ -1965,10 +2058,18 @@ async def _close_wizard_finalize(
         or str((shift or {}).get("close_started_at") or (shift or {}).get("open_time") or "")
     )
     started_dt: datetime | None
-    try:
-        started_dt = datetime.fromisoformat(started_at_value)
-    except ValueError:
+    if not started_at_value:
         started_dt = None
+    else:
+        try:
+            started_dt = datetime.fromisoformat(started_at_value)
+        except ValueError:
+            logger.warning(
+                "Invalid close_started_at for shift_id=%s: %r — duration will not be recorded",
+                shift_id,
+                started_at_value,
+            )
+            started_dt = None
 
     if started_dt and started_dt.tzinfo is None:
         started_dt = started_dt.replace(tzinfo=now.tzinfo)
@@ -2276,12 +2377,15 @@ async def close_wizard_callback(
 
     if action == "finish":
         if len(completed) < close_wizard_total_items():
+            target_section = close_wizard_section_for_index(
+                close_wizard_first_incomplete_index(completed)
+            )
             await _persist_close_wizard_progress(
                 state=state,
                 db=db,
                 shift_id=shift_id,
                 completed=completed,
-                active_section=active_section,
+                active_section=target_section,
                 selected_item_index=None,
                 finish_confirm=True,
                 values=values,
@@ -2290,13 +2394,16 @@ async def close_wizard_callback(
             await _render_close_wizard_screen(
                 source_message=callback.message,
                 state=state,
-                active_section=active_section,
+                active_section=target_section,
                 selected_item_index=None,
                 finish_confirm=True,
                 completed=completed,
                 values=values,
             )
-            await _answer("Вы не завершили все пункты", show_alert=True)
+            await _answer(
+                "Нельзя закрыть смену: выполните все пропущенные пункты.",
+                show_alert=True,
+            )
             return
         await _close_wizard_finalize(
             callback=callback,
@@ -2304,17 +2411,21 @@ async def close_wizard_callback(
             db=db,
             settings=settings,
             bot=bot,
-            force_finish=False,
         )
         return
 
     if action in {"finish_return", "return"}:
+        target_section = active_section
+        if len(completed) < close_wizard_total_items():
+            target_section = close_wizard_section_for_index(
+                close_wizard_first_incomplete_index(completed)
+            )
         await _persist_close_wizard_progress(
             state=state,
             db=db,
             shift_id=shift_id,
             completed=completed,
-            active_section=active_section,
+            active_section=target_section,
             selected_item_index=None,
             finish_confirm=False,
             values=values,
@@ -2323,7 +2434,7 @@ async def close_wizard_callback(
         await _render_close_wizard_screen(
             source_message=callback.message,
             state=state,
-            active_section=active_section,
+            active_section=target_section,
             selected_item_index=None,
             finish_confirm=False,
             completed=completed,
@@ -2333,13 +2444,9 @@ async def close_wizard_callback(
         return
 
     if action == "finish_force":
-        await _close_wizard_finalize(
-            callback=callback,
-            state=state,
-            db=db,
-            settings=settings,
-            bot=bot,
-            force_finish=True,
+        await _answer(
+            "Принудительное закрытие отключено. Сначала завершите чек-лист.",
+            show_alert=True,
         )
         return
 
@@ -2466,7 +2573,6 @@ async def close_wizard_callback(
                     db=db,
                     settings=settings,
                     bot=bot,
-                    force_finish=False,
                 )
                 return
             await _render_close_wizard_screen(
@@ -2576,7 +2682,6 @@ async def close_wizard_callback(
                 db=db,
                 settings=settings,
                 bot=bot,
-                force_finish=False,
             )
             return
         await _render_close_wizard_screen(
@@ -2646,7 +2751,6 @@ async def close_wizard_callback(
                 db=db,
                 settings=settings,
                 bot=bot,
-                force_finish=False,
             )
             return
         await _render_close_wizard_screen(
@@ -2820,7 +2924,6 @@ async def close_wizard_text_input(
             db=db,
             settings=settings,
             bot=bot,
-            force_finish=False,
             source_message=message,
             actor_id=message.from_user.id,
             actor_username=message.from_user.username,
@@ -2979,7 +3082,6 @@ async def close_wizard_media_input(
             db=db,
             settings=settings,
             bot=bot,
-            force_finish=False,
             source_message=message,
             actor_id=message.from_user.id,
             actor_username=message.from_user.username,

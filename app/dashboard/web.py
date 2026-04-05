@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.dashboard.service import DashboardFilters, build_dashboard_payload
 from app.db_schema import (
+    close_stale_open_shifts as close_stale_open_shifts_schema,
     ensure_close_residual_columns as ensure_close_residual_schema_columns,
     ensure_shift_audit_columns as ensure_shift_audit_schema_columns,
     ensure_shift_status_column as ensure_shift_status_schema_column,
@@ -117,6 +118,7 @@ def _prepare_dashboard_schema() -> None:
     try:
         _ensure_shift_columns(conn)
         _ensure_close_residual_columns(conn)
+        close_stale_open_shifts_schema(conn)
     finally:
         conn.close()
 
@@ -263,6 +265,17 @@ def dashboard(
     conn = _connect()
     try:
         payload = build_dashboard_payload(conn, filters)
+    except Exception:
+        logger.exception("Failed to build dashboard payload")
+        payload = {
+            "kpi": None,
+            "shifts": [],
+            "residuals": [],
+            "employees": [],
+            "charts": {},
+            "filters": {"date": filters.date},
+            "error": "Не удалось загрузить данные дашборда.",
+        }
     finally:
         conn.close()
 

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
+
+logger = logging.getLogger(__name__)
 
 
 def _table_exists(
@@ -60,16 +63,21 @@ def ensure_shift_status_column(
     if not _table_exists(conn, "shifts"):
         return
 
-    columns = _table_columns(conn, "shifts")
-    if "status" not in columns:
-        conn.execute("ALTER TABLE shifts ADD COLUMN status TEXT NOT NULL DEFAULT 'OPEN'")
-    conn.execute(
-        """
-        UPDATE shifts
-        SET status = CASE WHEN close_time IS NULL THEN 'OPEN' ELSE 'CLOSED' END
-        """
-    )
-    conn.commit()
+    try:
+        columns = _table_columns(conn, "shifts")
+        if "status" not in columns:
+            conn.execute("ALTER TABLE shifts ADD COLUMN status TEXT NOT NULL DEFAULT 'OPEN'")
+        conn.execute(
+            """
+            UPDATE shifts
+            SET status = CASE WHEN close_time IS NULL THEN 'OPEN' ELSE 'CLOSED' END
+            """
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration ensure_shift_status_column failed")
+        raise
 
 
 def ensure_shift_audit_columns(
@@ -86,58 +94,63 @@ def ensure_shift_audit_columns(
     if not _table_exists(conn, "shifts"):
         return
 
-    columns = _table_columns(conn, "shifts")
-    if "opened_at" not in columns:
-        conn.execute("ALTER TABLE shifts ADD COLUMN opened_at TEXT")
-    if "closed_at" not in columns:
-        conn.execute("ALTER TABLE shifts ADD COLUMN closed_at TEXT")
-    if "opened_by" not in columns:
-        conn.execute("ALTER TABLE shifts ADD COLUMN opened_by TEXT")
-    if "close_started_at" not in columns:
-        conn.execute("ALTER TABLE shifts ADD COLUMN close_started_at TEXT")
-    if "closed_by_id" not in columns:
-        conn.execute("ALTER TABLE shifts ADD COLUMN closed_by_id INTEGER")
-    if "closed_by_name" not in columns:
-        conn.execute("ALTER TABLE shifts ADD COLUMN closed_by_name TEXT")
-    if "close_duration_sec" not in columns:
-        conn.execute("ALTER TABLE shifts ADD COLUMN close_duration_sec INTEGER")
+    try:
+        columns = _table_columns(conn, "shifts")
+        if "opened_at" not in columns:
+            conn.execute("ALTER TABLE shifts ADD COLUMN opened_at TEXT")
+        if "closed_at" not in columns:
+            conn.execute("ALTER TABLE shifts ADD COLUMN closed_at TEXT")
+        if "opened_by" not in columns:
+            conn.execute("ALTER TABLE shifts ADD COLUMN opened_by TEXT")
+        if "close_started_at" not in columns:
+            conn.execute("ALTER TABLE shifts ADD COLUMN close_started_at TEXT")
+        if "closed_by_id" not in columns:
+            conn.execute("ALTER TABLE shifts ADD COLUMN closed_by_id INTEGER")
+        if "closed_by_name" not in columns:
+            conn.execute("ALTER TABLE shifts ADD COLUMN closed_by_name TEXT")
+        if "close_duration_sec" not in columns:
+            conn.execute("ALTER TABLE shifts ADD COLUMN close_duration_sec INTEGER")
 
-    conn.execute(
-        """
-        UPDATE shifts
-        SET opened_at = COALESCE(NULLIF(opened_at, ''), open_time)
-        WHERE opened_at IS NULL OR opened_at = ''
-        """
-    )
-    conn.execute(
-        """
-        UPDATE shifts
-        SET closed_at = COALESCE(NULLIF(closed_at, ''), close_time)
-        WHERE close_time IS NOT NULL AND (closed_at IS NULL OR closed_at = '')
-        """
-    )
-    conn.execute(
-        """
-        UPDATE shifts
-        SET opened_by = COALESCE(NULLIF(opened_by, ''), employee)
-        WHERE opened_by IS NULL OR opened_by = ''
-        """
-    )
-    conn.execute(
-        """
-        UPDATE shifts
-        SET closed_by_name = COALESCE(NULLIF(closed_by_name, ''), employee)
-        WHERE close_time IS NOT NULL AND (closed_by_name IS NULL OR closed_by_name = '')
-        """
-    )
-    conn.execute(
-        """
-        UPDATE shifts
-        SET close_started_at = COALESCE(NULLIF(close_started_at, ''), close_time, open_time)
-        WHERE close_time IS NOT NULL AND (close_started_at IS NULL OR close_started_at = '')
-        """
-    )
-    conn.commit()
+        conn.execute(
+            """
+            UPDATE shifts
+            SET opened_at = COALESCE(NULLIF(opened_at, ''), open_time)
+            WHERE opened_at IS NULL OR opened_at = ''
+            """
+        )
+        conn.execute(
+            """
+            UPDATE shifts
+            SET closed_at = COALESCE(NULLIF(closed_at, ''), close_time)
+            WHERE close_time IS NOT NULL AND (closed_at IS NULL OR closed_at = '')
+            """
+        )
+        conn.execute(
+            """
+            UPDATE shifts
+            SET opened_by = COALESCE(NULLIF(opened_by, ''), employee)
+            WHERE opened_by IS NULL OR opened_by = ''
+            """
+        )
+        conn.execute(
+            """
+            UPDATE shifts
+            SET closed_by_name = COALESCE(NULLIF(closed_by_name, ''), employee)
+            WHERE close_time IS NOT NULL AND (closed_by_name IS NULL OR closed_by_name = '')
+            """
+        )
+        conn.execute(
+            """
+            UPDATE shifts
+            SET close_started_at = COALESCE(NULLIF(close_started_at, ''), close_time, open_time)
+            WHERE close_time IS NOT NULL AND (close_started_at IS NULL OR close_started_at = '')
+            """
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration ensure_shift_audit_columns failed")
+        raise
 
 
 def ensure_close_residual_columns(
@@ -154,136 +167,141 @@ def ensure_close_residual_columns(
     if not _table_exists(conn, "close_residuals"):
         return
 
-    columns = _table_columns(conn, "close_residuals")
-    if "input_value" not in columns:
-        conn.execute("ALTER TABLE close_residuals ADD COLUMN input_value REAL")
-    if "unit_type" not in columns:
-        conn.execute("ALTER TABLE close_residuals ADD COLUMN unit_type TEXT")
-    if "normalized_quantity" not in columns:
-        conn.execute("ALTER TABLE close_residuals ADD COLUMN normalized_quantity REAL")
-    if "normalized_unit" not in columns:
-        conn.execute("ALTER TABLE close_residuals ADD COLUMN normalized_unit TEXT")
+    try:
+        columns = _table_columns(conn, "close_residuals")
+        if "input_value" not in columns:
+            conn.execute("ALTER TABLE close_residuals ADD COLUMN input_value REAL")
+        if "unit_type" not in columns:
+            conn.execute("ALTER TABLE close_residuals ADD COLUMN unit_type TEXT")
+        if "normalized_quantity" not in columns:
+            conn.execute("ALTER TABLE close_residuals ADD COLUMN normalized_quantity REAL")
+        if "normalized_unit" not in columns:
+            conn.execute("ALTER TABLE close_residuals ADD COLUMN normalized_unit TEXT")
 
-    conn.execute(
-        """
-        UPDATE close_residuals
-        SET input_value = COALESCE(input_value, quantity)
-        WHERE input_value IS NULL
-        """
-    )
-    conn.execute(
-        """
-        UPDATE close_residuals
-        SET normalized_quantity = COALESCE(normalized_quantity, quantity)
-        WHERE normalized_quantity IS NULL
-        """
-    )
-    conn.execute(
-        """
-        UPDATE close_residuals
-        SET normalized_unit = COALESCE(NULLIF(normalized_unit, ''), unit)
-        WHERE normalized_unit IS NULL OR normalized_unit = ''
-        """
-    )
-    conn.execute(
-        """
-        UPDATE close_residuals
-        SET unit_type = COALESCE(NULLIF(unit_type, ''), 'legacy')
-        WHERE unit_type IS NULL OR unit_type = ''
-        """
-    )
-    conn.execute(
-        """
-        UPDATE close_residuals
-        SET
-            unit_type = 'weight_g',
-            input_value = CASE
-                WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity * 1000.0
-                ELSE quantity
-            END,
-            normalized_quantity = CASE
-                WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity * 1000.0
-                ELSE quantity
-            END,
-            normalized_unit = 'г'
-        WHERE unit_type = 'legacy' AND item_key IN ('marinated_chicken', 'fried_chicken')
-        """
-    )
-    conn.execute(
-        """
-        UPDATE close_residuals
-        SET
-            unit_type = 'piece',
-            input_value = quantity,
-            normalized_quantity = quantity,
-            normalized_unit = 'шт'
-        WHERE unit_type = 'legacy' AND item_key = 'lavash'
-        """
-    )
-    conn.execute(
-        """
-        UPDATE close_residuals
-        SET
-            unit_type = 'liter',
-            input_value = CASE
-                WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml') THEN quantity / 1000.0
-                WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g') THEN quantity / 1000.0
-                WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity
-                ELSE quantity
-            END,
-            normalized_quantity = CASE
-                WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml') THEN quantity / 1000.0
-                WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g') THEN quantity / 1000.0
-                WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity
-                ELSE quantity
-            END,
-            normalized_unit = 'л',
-            unit = 'л'
-        WHERE unit_type = 'legacy' AND item_key = 'soup'
-        """
-    )
-    conn.execute(
-        """
-        UPDATE close_residuals
-        SET
-            unit_type = 'liter',
-            quantity = CASE
-                WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g', 'мл', 'ml') THEN quantity / 1000.0
-                WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity
-                ELSE quantity
-            END,
-            input_value = CASE
-                WHEN input_value IS NULL THEN NULL
-                WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g', 'мл', 'ml') THEN input_value / 1000.0
-                WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN input_value
-                ELSE input_value
-            END,
-            normalized_quantity = CASE
-                WHEN normalized_quantity IS NULL THEN NULL
-                WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g', 'мл', 'ml') THEN normalized_quantity / 1000.0
-                WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN normalized_quantity
-                ELSE normalized_quantity
-            END,
-            normalized_unit = 'л',
-            unit = 'л'
-        WHERE item_key = 'soup' AND unit_type = 'weight_g'
-        """
-    )
-    conn.execute(
-        """
-        UPDATE close_residuals
-        SET
-            unit_type = CASE
-                WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml') THEN 'legacy_ml'
-                ELSE 'gastro_unit'
-            END,
-            input_value = quantity,
-            normalized_quantity = quantity,
-            normalized_unit = COALESCE(NULLIF(unit, ''), 'гастроёмк')
-        WHERE unit_type = 'legacy' AND item_key = 'sauce'
-        """
-    )
-    conn.commit()
+        conn.execute(
+            """
+            UPDATE close_residuals
+            SET input_value = COALESCE(input_value, quantity)
+            WHERE input_value IS NULL
+            """
+        )
+        conn.execute(
+            """
+            UPDATE close_residuals
+            SET normalized_quantity = COALESCE(normalized_quantity, quantity)
+            WHERE normalized_quantity IS NULL
+            """
+        )
+        conn.execute(
+            """
+            UPDATE close_residuals
+            SET normalized_unit = COALESCE(NULLIF(normalized_unit, ''), unit)
+            WHERE normalized_unit IS NULL OR normalized_unit = ''
+            """
+        )
+        conn.execute(
+            """
+            UPDATE close_residuals
+            SET unit_type = COALESCE(NULLIF(unit_type, ''), 'legacy')
+            WHERE unit_type IS NULL OR unit_type = ''
+            """
+        )
+        conn.execute(
+            """
+            UPDATE close_residuals
+            SET
+                unit_type = 'weight_g',
+                input_value = CASE
+                    WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity * 1000.0
+                    ELSE quantity
+                END,
+                normalized_quantity = CASE
+                    WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity * 1000.0
+                    ELSE quantity
+                END,
+                normalized_unit = 'г'
+            WHERE unit_type = 'legacy' AND item_key IN ('marinated_chicken', 'fried_chicken')
+            """
+        )
+        conn.execute(
+            """
+            UPDATE close_residuals
+            SET
+                unit_type = 'piece',
+                input_value = quantity,
+                normalized_quantity = quantity,
+                normalized_unit = 'шт'
+            WHERE unit_type = 'legacy' AND item_key = 'lavash'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE close_residuals
+            SET
+                unit_type = 'liter',
+                input_value = CASE
+                    WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml') THEN quantity / 1000.0
+                    WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g') THEN quantity / 1000.0
+                    WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity
+                    ELSE quantity
+                END,
+                normalized_quantity = CASE
+                    WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml') THEN quantity / 1000.0
+                    WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g') THEN quantity / 1000.0
+                    WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity
+                    ELSE quantity
+                END,
+                normalized_unit = 'л',
+                unit = 'л'
+            WHERE unit_type = 'legacy' AND item_key = 'soup'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE close_residuals
+            SET
+                unit_type = 'liter',
+                quantity = CASE
+                    WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g', 'мл', 'ml') THEN quantity / 1000.0
+                    WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN quantity
+                    ELSE quantity
+                END,
+                input_value = CASE
+                    WHEN input_value IS NULL THEN NULL
+                    WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g', 'мл', 'ml') THEN input_value / 1000.0
+                    WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN input_value
+                    ELSE input_value
+                END,
+                normalized_quantity = CASE
+                    WHEN normalized_quantity IS NULL THEN NULL
+                    WHEN LOWER(COALESCE(unit, '')) IN ('г', 'g', 'мл', 'ml') THEN normalized_quantity / 1000.0
+                    WHEN LOWER(COALESCE(unit, '')) IN ('кг', 'kg') THEN normalized_quantity
+                    ELSE normalized_quantity
+                END,
+                normalized_unit = 'л',
+                unit = 'л'
+            WHERE item_key = 'soup' AND unit_type = 'weight_g'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE close_residuals
+            SET
+                unit_type = CASE
+                    WHEN LOWER(COALESCE(unit, '')) IN ('мл', 'ml') THEN 'legacy_ml'
+                    ELSE 'gastro_unit'
+                END,
+                input_value = quantity,
+                normalized_quantity = quantity,
+                normalized_unit = COALESCE(NULLIF(unit, ''), 'гастроёмк')
+            WHERE unit_type = 'legacy' AND item_key = 'sauce'
+            """
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration ensure_close_residual_columns failed")
+        raise
 
 
 def ensure_shift_status_index(
@@ -299,5 +317,43 @@ def ensure_shift_status_index(
     """
     if not _table_exists(conn, "shifts"):
         return
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_shifts_status ON shifts(status);")
-    conn.commit()
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_shifts_status ON shifts(status);")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration ensure_shift_status_index failed")
+        raise
+
+
+def close_stale_open_shifts(
+    conn: sqlite3.Connection,
+) -> None:
+    """Закрывает OPEN-смены, дата которых раньше сегодняшней.
+
+    Такие смены были брошены без завершения. Активная текущая смена
+    всегда имеет date = сегодня, поэтому фильтр безопасен.
+
+    Args:
+        conn: Подключение SQLite.
+
+    Returns:
+        None.
+    """
+    if not _table_exists(conn, "shifts"):
+        return
+    try:
+        conn.execute(
+            """
+            UPDATE shifts
+            SET status = 'CLOSED'
+            WHERE status = 'OPEN'
+              AND close_time IS NULL
+              AND date < date('now', 'localtime')
+            """
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration close_stale_open_shifts failed")
+        raise
