@@ -48,10 +48,12 @@ class DashboardFilters:
     """Фильтры операционного дашборда.
 
     Args:
-        date: Дата в формате YYYY-MM-DD.
+        date_from: Начало диапазона в формате YYYY-MM-DD.
+        date_to: Конец диапазона в формате YYYY-MM-DD.
     """
 
-    date: str | None
+    date_from: str | None
+    date_to: str | None
 
 
 def format_duration(
@@ -370,9 +372,12 @@ def _fetch_shifts(
 
     conditions: list[str] = []
     params: list[object] = []
-    if filters.date:
-        conditions.append("s.date = ?")
-        params.append(filters.date)
+    if filters.date_from:
+        conditions.append("s.date >= ?")
+        params.append(filters.date_from)
+    if filters.date_to:
+        conditions.append("s.date <= ?")
+        params.append(filters.date_to)
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     query = f"""
@@ -680,6 +685,10 @@ def _build_shift_models(
             if is_closed_shift
             else "В процессе"
         )
+        if is_closed_shift:
+            close_status_class = "badge--ok" if sections_done == sections_total else "badge--warn"
+        else:
+            close_status_class = "badge--neutral"
         close_status_details = close_status_labels if is_closed_shift else []
         media_items = close_media_by_shift.get(shift_id, [])
 
@@ -699,6 +708,7 @@ def _build_shift_models(
                 "close_checklist_total": close_total,
                 "close_status_labels": close_status_details,
                 "close_status_summary": close_status_summary,
+                "close_status_class": close_status_class,
                 "has_checklist_error": has_checklist_error,
                 "close_media_count": len(media_items),
                 "close_media_items": media_items,
@@ -850,12 +860,30 @@ def _build_kpi(
             checklist_rates.append((done / total) * 100)
     checklist_completion_pct = int(round(mean(checklist_rates))) if checklist_rates else 0
 
+    if checklist_completion_pct >= 95:
+        checklist_completion_class = "kpi--good"
+    elif checklist_completion_pct >= 75:
+        checklist_completion_class = "kpi--warn"
+    else:
+        checklist_completion_class = "kpi--danger"
+
+    if avg_close is None:
+        avg_close_class = ""
+    elif avg_close <= 20:
+        avg_close_class = "kpi--good"
+    elif avg_close <= 40:
+        avg_close_class = "kpi--warn"
+    else:
+        avg_close_class = "kpi--danger"
+
     return {
         "shifts_count": len(shifts),
         "avg_close_minutes": avg_close,
         "avg_close_label": format_duration(avg_close),
+        "avg_close_class": avg_close_class,
         "checklist_completion_pct": checklist_completion_pct,
         "checklist_completion_label": f"{checklist_completion_pct}%",
+        "checklist_completion_class": checklist_completion_class,
     }
 
 
@@ -939,6 +967,20 @@ def build_dashboard_payload(
     kpi = _build_kpi(shifts)
     charts = _build_charts(residual_analytics, shifts)
 
+    from_date = filters.date_from
+    to_date = filters.date_to
+    if from_date and to_date:
+        if from_date == to_date:
+            period_label = _fmt_date(from_date)
+        else:
+            period_label = f"{_fmt_date(from_date)} — {_fmt_date(to_date)}"
+    elif from_date:
+        period_label = f"с {_fmt_date(from_date)}"
+    elif to_date:
+        period_label = f"по {_fmt_date(to_date)}"
+    else:
+        period_label = "Все смены"
+
     return {
         "kpi": kpi,
         "shifts": shifts,
@@ -946,6 +988,9 @@ def build_dashboard_payload(
         "employees": employee_analytics,
         "charts": charts,
         "filters": {
-            "date": filters.date or "",
+            "date_from": filters.date_from or "",
+            "date_to": filters.date_to or "",
         },
+        "period_label": period_label,
+        "subtitle": f"Данные за: {period_label}",
     }

@@ -127,6 +127,11 @@ def setup_scheduler(
             except (KeyError, TypeError, ValueError):
                 continue
 
+        if not employee_ids:
+            logger.debug("Reminder skipped — no active employees today")
+            return
+
+        logger.debug("Sending reminder to %d employee(s): %s", len(employee_ids), sorted(employee_ids))
         for employee_id in sorted(employee_ids):
             try:
                 await bot.send_message(employee_id, text)
@@ -142,6 +147,7 @@ def setup_scheduler(
         Returns:
             None.
         """
+        logger.debug("Scheduler job: supplies_and_cleanliness_reminder")
         await _send_to_active_employees(SUPPLIES_AND_CLEANLINESS_REMINDER_TEXT)
 
     async def remind_product_order() -> None:
@@ -153,6 +159,7 @@ def setup_scheduler(
         Returns:
             None.
         """
+        logger.debug("Scheduler job: product_order_reminder")
         await _send_to_active_employees(PRODUCT_ORDER_REMINDER_TEXT)
 
     async def notify_if_shift_not_opened() -> None:
@@ -164,18 +171,21 @@ def setup_scheduler(
         Returns:
             None.
         """
+        logger.debug("Scheduler job: opening_deadline_check")
         shift_date = datetime.now(timezone).date().isoformat()
         has_opened = await db.has_shift_opened_on(
             shift_date,
             open_checklist_total=open_total_items,
         )
         if has_opened:
+            logger.debug("Opening deadline check: shift already opened on %s", shift_date)
             return
         try:
             await bot.send_message(
                 settings.owner_id,
                 f"Смена не открыта до {opening_deadline_label} ({shift_date}).",
             )
+            logger.info("Owner notified: shift not opened by %s on %s", opening_deadline_label, shift_date)
         except Exception:
             logger.exception("Failed to notify owner about unopened shift")
 
@@ -198,7 +208,7 @@ def setup_scheduler(
                 shift_id=shift_id,
                 checklist_type="close",
             )
-            done_items = len(close_state["completed"]) if close_state else 0
+            done_items = len(close_state.get("completed", [])) if close_state else 0
             if done_items < close_total_items:
                 return True
         return False
@@ -212,7 +222,9 @@ def setup_scheduler(
         Returns:
             None.
         """
+        logger.debug("Scheduler job: close_checklist_reminder")
         if not await _has_incomplete_close_checklist():
+            logger.debug("Close checklist reminder: all shifts closed, skipping")
             return
 
         try:
@@ -220,6 +232,7 @@ def setup_scheduler(
                 settings.work_chat_id,
                 INCOMPLETE_CLOSE_CHECKLIST_TEXT,
             )
+            logger.info("Work chat notified: incomplete close checklist")
         except Exception:
             logger.exception("Failed to send close checklist reminder to work chat")
 

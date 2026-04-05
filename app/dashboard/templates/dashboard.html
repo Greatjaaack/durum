@@ -6,8 +6,12 @@
 <section class="card filters">
   <form method="get" action="/dashboard" class="filters__grid compact">
     <label class="field">
-      <span>Дата</span>
-      <input type="date" name="date" value="{{ filters.date }}" />
+      <span>С</span>
+      <input type="date" name="date_from" value="{{ filters.date_from }}" />
+    </label>
+    <label class="field">
+      <span>По</span>
+      <input type="date" name="date_to" value="{{ filters.date_to }}" />
     </label>
     <div class="filters__actions">
       <button type="submit">Показать</button>
@@ -31,11 +35,11 @@
     <div class="kpi-card__label">Смен</div>
     <div class="kpi-card__value">{{ kpi.shifts_count }}</div>
   </article>
-  <article class="kpi-card">
+  <article class="kpi-card {{ kpi.avg_close_class }}">
     <div class="kpi-card__label">Среднее закрытие</div>
     <div class="kpi-card__value">{{ kpi.avg_close_label }}</div>
   </article>
-  <article class="kpi-card">
+  <article class="kpi-card {{ kpi.checklist_completion_class }}">
     <div class="kpi-card__label">Заполнение</div>
     <div class="kpi-card__value">{{ kpi.checklist_completion_label }}</div>
   </article>
@@ -63,7 +67,7 @@
             <td>{{ row.item_label }}</td>
             <td>{{ row.current_label }} {{ row.unit }}</td>
             <td>{{ row.avg_label }} {{ row.unit }}</td>
-            <td>{{ row.deviation_label }}</td>
+            <td class="{% if row.is_anomaly %}anomaly-cell{% endif %}">{{ row.deviation_label }}</td>
           </tr>
           {% endfor %}
           {% else %}
@@ -140,7 +144,7 @@
   <div class="card__header">
     <h2>⏱ Смены</h2>
   </div>
-  <div class="table-wrap">
+  <div class="table-wrap table-wrap--scrollable">
     <table class="shifts-table">
       <thead>
         <tr>
@@ -167,7 +171,7 @@
           <td class="cell-duration">{{ row.duration_label }}</td>
           <td class="cell-duration">{{ row.close_duration_label }}</td>
           <td class="checklist-status">
-            <span class="status-main">{{ row.close_status_summary }}</span>
+            <span class="status-main badge {{ row.close_status_class }}">{{ row.close_status_summary }}</span>
             {% if row.close_status_labels %}
             <span class="status-details">{{ row.close_status_labels | join(" · ") }}</span>
             {% endif %}
@@ -177,10 +181,9 @@
             <div class="media-list">
               {% for media in row.close_media_items %}
               <a
-                class="media-thumb"
+                class="media-thumb js-lightbox"
                 href="/dashboard/media/{{ media.media_id }}"
-                target="_blank"
-                rel="noopener noreferrer"
+                data-label="{{ media.item_label }}"
                 title="{{ media.item_label }}"
               >
                 <img
@@ -206,6 +209,16 @@
     </table>
   </div>
 </section>
+
+<!-- Lightbox -->
+<div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Просмотр фото">
+  <div class="lightbox__backdrop"></div>
+  <div class="lightbox__content">
+    <button class="lightbox__close" aria-label="Закрыть">✕</button>
+    <p class="lightbox__label"></p>
+    <img class="lightbox__img" src="" alt="" />
+  </div>
+</div>
 
 <script id="dashboard-charts-data" type="application/json">{{ charts | tojson }}</script>
 {% endblock %}
