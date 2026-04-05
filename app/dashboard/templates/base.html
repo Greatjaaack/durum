@@ -11,6 +11,7 @@
 <body>
   <header class="topbar">
     <div class="topbar__title">Durum Dashboard</div>
+    {% if subtitle %}<div class="topbar__subtitle">{{ subtitle }}</div>{% endif %}
   </header>
   <main class="layout">
     {% block content %}{% endblock %}

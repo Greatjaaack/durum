@@ -247,19 +247,22 @@ def icon_placeholder_head() -> Response:
 @app.get(DASHBOARD_ROUTE)
 def dashboard(
     request: Request,
-    date: str | None = Query(default=None, description="Дата в формате YYYY-MM-DD"),
+    date_from: str | None = Query(default=None, description="Начало периода YYYY-MM-DD"),
+    date_to: str | None = Query(default=None, description="Конец периода YYYY-MM-DD"),
 ):
     """Рендерит операционный dashboard смен.
 
     Args:
         request: Объект HTTP-запроса FastAPI.
-        date: Фильтр по дате.
+        date_from: Начало диапазона дат.
+        date_to: Конец диапазона дат.
 
     Returns:
         Jinja2 TemplateResponse.
     """
     filters = DashboardFilters(
-        date=_normalize_date(date),
+        date_from=_normalize_date(date_from),
+        date_to=_normalize_date(date_to),
     )
 
     conn = _connect()
@@ -273,7 +276,9 @@ def dashboard(
             "residuals": [],
             "employees": [],
             "charts": {},
-            "filters": {"date": filters.date},
+            "filters": {"date_from": filters.date_from or "", "date_to": filters.date_to or ""},
+            "subtitle": "",
+            "period_label": "",
             "error": "Не удалось загрузить данные дашборда.",
         }
     finally:

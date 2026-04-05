@@ -192,10 +192,11 @@ def build_checklist_text(checklist_type: str, completed: set[int], active_sectio
     progress_pct = _progress_percent(done, total)
     progress_bar = _progress_bar(done, total)
 
+    sections_count = len(sections)
     return "\n".join(
         [
             _checklist_title_with_emoji(checklist_type),
-            f"Блок {active_section + 1} — {section['title']}",
+            f"Блок {active_section + 1} из {sections_count} — {section['title']}",
             f"Прогресс: {done} / {total}",
             f"{progress_bar} {progress_pct}%",
         ]
@@ -266,7 +267,7 @@ def build_checklist_keyboard(
         )
         nav_row.append(
             InlineKeyboardButton(
-                text="➡",
+                text="Далее →",
                 callback_data=next_callback,
             )
         )

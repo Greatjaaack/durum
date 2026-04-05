@@ -177,6 +177,30 @@ class TimezoneFormatter(logging.Formatter):
         return dt.isoformat(sep=" ", timespec="seconds")
 
 
+_LOG_RETENTION_DAYS = 30
+
+
+def _cleanup_old_logs(log_dir: Path, retention_days: int = _LOG_RETENTION_DAYS) -> None:
+    """Удаляет файлы логов старше retention_days дней.
+
+    Args:
+        log_dir: Директория с логами.
+        retention_days: Сколько дней хранить.
+
+    Returns:
+        None.
+    """
+    cutoff = datetime.now().date().toordinal() - retention_days
+    for log_file in log_dir.glob("app_*.log"):
+        try:
+            date_part = log_file.stem.removeprefix("app_")
+            file_date = datetime.strptime(date_part, "%Y-%m-%d").date()
+            if file_date.toordinal() < cutoff:
+                log_file.unlink()
+        except (ValueError, OSError):
+            continue
+
+
 def configure_logging(
     log_dir: str | Path = "logs",
     timezone: str = "Europe/Moscow",
@@ -191,6 +215,7 @@ def configure_logging(
     """
     logs_path = Path(log_dir)
     logs_path.mkdir(parents=True, exist_ok=True)
+    _cleanup_old_logs(logs_path)
 
     formatter = TimezoneFormatter(
         fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

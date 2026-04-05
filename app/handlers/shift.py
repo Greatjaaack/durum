@@ -1576,6 +1576,14 @@ async def _close_wizard_store_input(
         employee=employee,
         employee_id=employee_id,
     )
+    logger.debug(
+        "Residual saved: shift_id=%s key=%s value=%s normalized=%s unit=%s",
+        shift_id,
+        item.residual_key,
+        display_value,
+        normalized_quantity,
+        normalized_unit,
+    )
 
 
 def _get_normalized_residual(
@@ -2111,6 +2119,14 @@ async def _close_wizard_finalize_inner(
         closed_by_name=employee,
         close_duration_sec=close_duration_sec,
     )
+    logger.info(
+        "Shift record closed: shift_id=%s meat_end=%.3f lavash_end=%.1f meat_used=%s duration_sec=%s",
+        shift_id,
+        marinated_chicken,
+        lavash,
+        meat_used,
+        close_duration_sec,
+    )
 
     stock_date = now.date().isoformat()
     stock_time = now.time().replace(microsecond=0).isoformat()
@@ -2129,6 +2145,12 @@ async def _close_wizard_finalize_inner(
         employee=employee,
         employee_id=actor_id,
         stock_time=stock_time,
+    )
+    logger.debug(
+        "Stock saved: shift_id=%s мясо=%.3f лаваш=%.1f",
+        shift_id,
+        marinated_chicken,
+        lavash,
     )
 
     duration_text = _close_duration_label(close_duration_sec)
@@ -3058,6 +3080,12 @@ async def close_wizard_media_input(
             file_unique_id=media_file_unique_id,
             mime_type=media_mime_type,
             created_at=created_at,
+        )
+        logger.debug(
+            "Checklist media saved: shift_id=%s item_index=%s item=%r",
+            shift_id,
+            item.index,
+            item.text,
         )
 
     completed.add(item.index)

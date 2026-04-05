@@ -11,6 +11,11 @@ services:
     volumes:
       - ./data:/data
       - ./logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   dashboard:
     build: .
@@ -23,5 +28,11 @@ services:
     command: ["python", "-m", "uvicorn", "app.dashboard:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
       - ./data:/data
+      - ./logs:/app/logs
     ports:
       - "8000:8000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
