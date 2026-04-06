@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 from app.db_schema import (
     close_stale_open_shifts as close_stale_open_shifts_schema,
     ensure_close_residual_columns as ensure_close_residual_schema_columns,
+    ensure_last_mid_at_column as ensure_last_mid_at_schema_column,
+    ensure_mid_checklist_data_table as ensure_mid_checklist_data_schema_table,
+    ensure_open_checklist_media_table as ensure_open_checklist_media_schema_table,
     ensure_shift_audit_columns as ensure_shift_audit_schema_columns,
     ensure_shift_status_column as ensure_shift_status_schema_column,
     ensure_shift_status_index as ensure_shift_status_schema_index,
@@ -151,6 +154,21 @@ class Database:
         with self._lock:
             close_stale_open_shifts_schema(self._conn)
 
+    def _ensure_last_mid_at_column(self) -> None:
+        """Добавляет колонку last_mid_at в таблицу shifts."""
+        with self._lock:
+            ensure_last_mid_at_schema_column(self._conn)
+
+    def _ensure_open_checklist_media_table(self) -> None:
+        """Создаёт таблицу open_checklist_media."""
+        with self._lock:
+            ensure_open_checklist_media_schema_table(self._conn)
+
+    def _ensure_mid_checklist_data_table(self) -> None:
+        """Создаёт таблицу mid_checklist_data."""
+        with self._lock:
+            ensure_mid_checklist_data_schema_table(self._conn)
+
     async def init(self) -> None:
         """Инициализирует схему базы данных и миграции.
 
@@ -259,6 +277,9 @@ class Database:
         await asyncio.to_thread(self._ensure_close_residual_columns)
         await asyncio.to_thread(self._ensure_shift_status_index)
         await asyncio.to_thread(self._close_stale_open_shifts)
+        await asyncio.to_thread(self._ensure_last_mid_at_column)
+        await asyncio.to_thread(self._ensure_open_checklist_media_table)
+        await asyncio.to_thread(self._ensure_mid_checklist_data_table)
 
     async def create_shift(
         self,
@@ -632,6 +653,132 @@ class Database:
                 mime_type,
                 created_at,
             ),
+        )
+
+    async def update_shift_last_mid(self, shift_id: int, timestamp: str) -> None:
+        """Обновляет время последнего завершённого чек-листа ведения смены.
+
+        Args:
+            shift_id: Идентификатор смены.
+            timestamp: ISO-время завершения mid-чек-листа.
+
+        Returns:
+            None.
+        """
+        query = "UPDATE shifts SET last_mid_at = ? WHERE id = ?"
+        await asyncio.to_thread(self._execute, query, (timestamp, shift_id))
+
+    async def upsert_open_checklist_media(
+        self,
+        *,
+        shift_id: int,
+        item_index: int,
+        item_label: str,
+        file_id: str,
+        file_unique_id: str | None,
+        mime_type: str | None,
+        created_at: str,
+    ) -> None:
+        """Создаёт или обновляет фото для пункта открытия смены.
+
+        Args:
+            shift_id: Идентификатор смены.
+            item_index: Индекс пункта в чек-листе открытия.
+            item_label: Текст пункта.
+            file_id: Telegram file_id.
+            file_unique_id: Telegram file_unique_id.
+            mime_type: MIME-тип файла.
+            created_at: Время фиксации фото.
+
+        Returns:
+            None.
+        """
+        query = """
+        INSERT INTO open_checklist_media (
+            shift_id,
+            item_index,
+            item_label,
+            file_id,
+            file_unique_id,
+            mime_type,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(shift_id, item_index) DO UPDATE
+        SET item_label = excluded.item_label,
+            file_id = excluded.file_id,
+            file_unique_id = excluded.file_unique_id,
+            mime_type = excluded.mime_type,
+            created_at = excluded.created_at
+        """
+        await asyncio.to_thread(
+            self._execute,
+            query,
+            (
+                shift_id,
+                item_index,
+                item_label,
+                file_id,
+                file_unique_id,
+                mime_type,
+                created_at,
+            ),
+        )
+
+    async def get_open_checklist_media(
+        self,
+        shift_id: int,
+        item_index: int,
+    ) -> dict[str, Any] | None:
+        """Возвращает фото пункта открытия смены.
+
+        Args:
+            shift_id: Идентификатор смены.
+            item_index: Индекс пункта.
+
+        Returns:
+            Словарь с данными фото или None.
+        """
+        query = """
+        SELECT * FROM open_checklist_media
+        WHERE shift_id = ? AND item_index = ?
+        LIMIT 1
+        """
+        return await asyncio.to_thread(self._fetchone, query, (shift_id, item_index))
+
+    async def upsert_mid_checklist_data(
+        self,
+        *,
+        shift_id: int,
+        key: str,
+        value: float,
+        unit: str,
+        created_at: str,
+    ) -> None:
+        """Сохраняет числовые данные ведения смены.
+
+        Args:
+            shift_id: Идентификатор смены.
+            key: Ключ показателя.
+            value: Числовое значение.
+            unit: Единица измерения.
+            created_at: Время ввода данных.
+
+        Returns:
+            None.
+        """
+        query = """
+        INSERT INTO mid_checklist_data (shift_id, key, value, unit, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(shift_id, key) DO UPDATE
+        SET value = excluded.value,
+            unit = excluded.unit,
+            created_at = excluded.created_at
+        """
+        await asyncio.to_thread(
+            self._execute,
+            query,
+            (shift_id, key, value, unit, created_at),
         )
 
     async def set_shift_meat_start(self, shift_id: int, meat_start: float) -> None:

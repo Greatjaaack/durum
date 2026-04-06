@@ -17,6 +17,18 @@ class StockStates(StatesGroup):
     waiting_potato = State()
 
 
+class OpenShiftStates(StatesGroup):
+    """Состояния FSM для открытия смены."""
+
+    waiting_photo = State()
+
+
+class MidShiftStates(StatesGroup):
+    """Состояния FSM для ведения смены."""
+
+    waiting_numeric = State()
+
+
 class ProblemStates(StatesGroup):
     """Состояния FSM для фиксации проблем."""
 

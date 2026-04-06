@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone as _utc_tz
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
@@ -27,6 +27,17 @@ INCOMPLETE_CLOSE_CHECKLIST_TEXT = "⚠️ Смена ещё не закрыта\
 
 # Шаг часов для периодического напоминания о хозах и чистоте.
 SUPPLIES_AND_CLEANLINESS_REMINDER_HOUR_STEP = "*/2"
+
+# Текст напоминания о прохождении чек-листа ведения смены.
+MID_CHECKLIST_REMINDER_TEXT = (
+    "⏰ Напоминание: пройдите чек-лист ведения смены (/mid)"
+)
+
+# Шаг часов для напоминания о чек-листе ведения смены.
+MID_CHECKLIST_REMINDER_HOUR_STEP = "*/2"
+
+# Минимальный интервал (в часах) между прохождениями mid для напоминания.
+MID_CHECKLIST_REMINDER_INTERVAL_HOURS = 2
 
 # Час ежедневной проверки заказа продукции.
 PRODUCT_ORDER_REMINDER_HOUR = 19
@@ -236,6 +247,53 @@ def setup_scheduler(
         except Exception:
             logger.exception("Failed to send close checklist reminder to work chat")
 
+    async def remind_mid_checklist() -> None:
+        """Напоминает пройти чек-лист ведения смены, если он не пройден более 2 часов.
+
+        Args:
+            Нет параметров.
+
+        Returns:
+            None.
+        """
+        logger.debug("Scheduler job: mid_checklist_reminder")
+        active_shifts = await _get_active_shifts_for_current_date()
+        if not active_shifts:
+            logger.debug("Mid checklist reminder: no active shifts today")
+            return
+
+        now = datetime.now(_utc_tz.utc)
+        for shift in active_shifts:
+            employee_id_raw = shift.get("employee_id")
+            try:
+                employee_id = int(employee_id_raw)
+            except (TypeError, ValueError):
+                continue
+
+            last_mid_raw = shift.get("last_mid_at")
+            if last_mid_raw:
+                try:
+                    last_mid = datetime.fromisoformat(str(last_mid_raw))
+                    if last_mid.tzinfo is None:
+                        last_mid = last_mid.replace(tzinfo=_utc_tz.utc)
+                    if now - last_mid < timedelta(hours=MID_CHECKLIST_REMINDER_INTERVAL_HOURS):
+                        logger.debug(
+                            "Mid checklist reminder skipped for employee %s: "
+                            "completed recently",
+                            employee_id,
+                        )
+                        continue
+                except ValueError:
+                    pass
+
+            try:
+                await bot.send_message(employee_id, MID_CHECKLIST_REMINDER_TEXT)
+                logger.info("Mid checklist reminder sent to employee %s", employee_id)
+            except Exception:
+                logger.exception(
+                    "Failed to send mid checklist reminder to employee %s", employee_id
+                )
+
     scheduler.add_job(
         remind_supplies_and_cleanliness,
         trigger=CronTrigger(
@@ -284,6 +342,16 @@ def setup_scheduler(
             timezone=timezone,
         ),
         id="close_checklist_reminder_second",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        remind_mid_checklist,
+        trigger=CronTrigger(
+            minute=0,
+            hour=MID_CHECKLIST_REMINDER_HOUR_STEP,
+            timezone=timezone,
+        ),
+        id="mid_checklist_reminder",
         replace_existing=True,
     )
     return scheduler
