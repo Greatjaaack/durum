@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 from aiogram import Bot, F, Router
@@ -18,6 +18,8 @@ from app.checklist.data import (
     CLOSE_RESIDUAL_INPUTS,
     CLOSE_RESIDUAL_INPUTS_BY_CHECKLIST_ITEM,
     CLOSE_SECTION_EMOJI_BY_TITLE,
+    MID_NUMERIC_INPUTS_BY_ITEM_TEXT,
+    flat_checklist_items,
 )
 from app.checklist.ui import (
     build_checklist_keyboard,
@@ -35,7 +37,7 @@ from app.handlers.constants import (
     MENU_OPEN_SHIFT,
 )
 from app.handlers.shift_checklist import checklist_state_keys, restore_completed_indexes
-from app.handlers.states import CloseShiftStates
+from app.handlers.states import CloseShiftStates, MidShiftStates, OpenShiftStates
 from app.handlers.utils import (
     build_shift_menu_keyboard,
     employee_name,
@@ -723,6 +725,218 @@ async def open_shift(
 
     logger.info("Открыта смена shift_id=%s employee_id=%s", shift_id, message.from_user.id)
     await _start_checklist(message, state, db, "open", shift_id)
+
+
+@shift_router.message(OpenShiftStates.waiting_photo, (F.photo | F.document))
+async def open_checklist_photo_input(
+    message: Message,
+    state: FSMContext,
+    db: Database,
+) -> None:
+    """Принимает обязательное фото холодильника при открытии смены.
+
+    Args:
+        message: Входящее сообщение Telegram.
+        state: FSM-контекст пользователя.
+        db: Экземпляр базы данных.
+
+    Returns:
+        None.
+    """
+    if not message.from_user:
+        return
+
+    state_data = await state.get_data()
+    item_index: int | None = None
+    shift_id: int | None = None
+    try:
+        item_index = int(state_data["open_photo_item_index"])
+        shift_id = int(state_data["open_photo_shift_id"])
+    except (KeyError, TypeError, ValueError):
+        await state.clear()
+        await message.answer("Что-то пошло не так. Повторите открытие через /open.")
+        return
+
+    if message.document:
+        mime = str(message.document.mime_type or "").lower()
+        if not mime.startswith("image/"):
+            await message.answer("Нужно отправить именно фото, а не файл.")
+            return
+
+    media_file_id: str | None = None
+    media_file_unique_id: str | None = None
+    media_mime_type: str | None = None
+    if message.photo:
+        largest = message.photo[-1]
+        media_file_id = str(largest.file_id)
+        media_file_unique_id = str(largest.file_unique_id)
+        media_mime_type = "image/jpeg"
+    elif message.document:
+        media_file_id = str(message.document.file_id)
+        media_file_unique_id = str(message.document.file_unique_id)
+        media_mime_type = str(message.document.mime_type or "").strip() or None
+
+    if not media_file_id:
+        await message.answer("Не удалось получить фото. Попробуйте ещё раз.")
+        return
+
+    created_at = (
+        message.date.isoformat()
+        if message.date is not None
+        else datetime.utcnow().replace(microsecond=0).isoformat()
+    )
+
+    open_items = flat_checklist_items("open")
+    item_label = open_items[item_index] if item_index < len(open_items) else "Фото холодильника"
+
+    await db.upsert_open_checklist_media(
+        shift_id=shift_id,
+        item_index=item_index,
+        item_label=item_label,
+        file_id=media_file_id,
+        file_unique_id=media_file_unique_id,
+        mime_type=media_mime_type,
+        created_at=created_at,
+    )
+
+    # Отмечаем пункт как выполненный
+    saved_state = await db.get_checklist_state(shift_id=shift_id, checklist_type="open")
+    keys = checklist_state_keys("open")
+    completed = restore_completed_indexes({}, keys["done_key"], saved_state)
+    completed.add(item_index)
+    completed_sorted = sorted(completed)
+
+    open_total = checklist_total_items("open")
+    active_section_raw = saved_state.get("active_section", 0) if saved_state else 0
+    try:
+        active_section = int(active_section_raw)
+    except (TypeError, ValueError):
+        active_section = 0
+    active_section = normalize_checklist_section("open", active_section)
+
+    await db.upsert_checklist_state(
+        shift_id=shift_id,
+        checklist_type="open",
+        completed=completed_sorted,
+        active_section=active_section,
+    )
+    await state.clear()
+
+    await safe_delete_message(message, log_context="open checklist photo input")
+
+    if len(completed) >= open_total:
+        await message.answer(
+            "Смена открыта ✅",
+            reply_markup=build_shift_menu_keyboard(is_shift_open=True),
+        )
+    else:
+        await message.answer("✅ Фото сохранено. Продолжайте чек-лист.")
+        await _start_checklist(message, state, db, "open", shift_id)
+
+
+@shift_router.message(MidShiftStates.waiting_numeric, F.text)
+async def mid_checklist_numeric_input(
+    message: Message,
+    state: FSMContext,
+    db: Database,
+) -> None:
+    """Принимает числовой ввод для пункта ведения смены.
+
+    Args:
+        message: Входящее сообщение Telegram.
+        state: FSM-контекст пользователя.
+        db: Экземпляр базы данных.
+
+    Returns:
+        None.
+    """
+    if not message.from_user or not message.text:
+        return
+
+    state_data = await state.get_data()
+    item_index: int | None = None
+    shift_id: int | None = None
+    try:
+        item_index = int(state_data["mid_numeric_item_index"])
+        shift_id = int(state_data["mid_numeric_shift_id"])
+    except (KeyError, TypeError, ValueError):
+        await state.clear()
+        await message.answer("Что-то пошло не так. Запустите /mid заново.")
+        return
+
+    item_text = str(state_data.get("mid_numeric_item_text", ""))
+    cfg: dict[str, object] = MID_NUMERIC_INPUTS_BY_ITEM_TEXT.get(item_text, {})
+
+    raw_text = message.text.strip().replace(",", ".")
+    try:
+        value = float(raw_text)
+    except ValueError:
+        await message.answer("Пожалуйста, введите число (например, 500).")
+        return
+
+    max_value = cfg.get("max_value")
+    if max_value is not None and value > float(max_value):
+        await message.answer(f"Слишком большое значение. Максимум: {int(max_value)}.")
+        return
+    if value < 0:
+        await message.answer("Значение не может быть отрицательным.")
+        return
+
+    only_integer = bool(cfg.get("only_integer", False))
+    if only_integer and value != int(value):
+        await message.answer("Значение должно быть целым числом.")
+        return
+
+    unit = str(cfg.get("unit", ""))
+    key = str(cfg.get("key", ""))
+    created_at = (
+        message.date.isoformat()
+        if message.date is not None
+        else datetime.utcnow().replace(microsecond=0).isoformat()
+    )
+
+    await db.upsert_mid_checklist_data(
+        shift_id=shift_id,
+        key=key,
+        value=value,
+        unit=unit,
+        created_at=created_at,
+    )
+
+    # Отмечаем пункт как выполненный
+    saved_state = await db.get_checklist_state(shift_id=shift_id, checklist_type="mid")
+    keys = checklist_state_keys("mid")
+    completed = restore_completed_indexes({}, keys["done_key"], saved_state)
+    completed.add(item_index)
+    completed_sorted = sorted(completed)
+
+    mid_total = checklist_total_items("mid")
+    active_section_raw = saved_state.get("active_section", 0) if saved_state else 0
+    try:
+        active_section = int(active_section_raw)
+    except (TypeError, ValueError):
+        active_section = 0
+    active_section = normalize_checklist_section("mid", active_section)
+
+    await db.upsert_checklist_state(
+        shift_id=shift_id,
+        checklist_type="mid",
+        completed=completed_sorted,
+        active_section=active_section,
+    )
+    await state.clear()
+
+    display_value = int(value) if only_integer else value
+    await message.answer(f"✅ Записано: {display_value} {unit}")
+
+    if len(completed) >= mid_total:
+        await db.update_shift_last_mid(shift_id, datetime.now(timezone.utc).isoformat())
+        await message.answer(
+            "✅ Чек-лист ведения смены завершён.",
+            reply_markup=build_shift_menu_keyboard(is_shift_open=True),
+        )
+    else:
+        await _start_checklist(message, state, db, "mid", shift_id)
 
 
 @shift_router.message(Command("mid"))

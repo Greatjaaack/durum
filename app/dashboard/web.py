@@ -20,6 +20,9 @@ from app.dashboard.service import DashboardFilters, build_dashboard_payload
 from app.db_schema import (
     close_stale_open_shifts as close_stale_open_shifts_schema,
     ensure_close_residual_columns as ensure_close_residual_schema_columns,
+    ensure_last_mid_at_column as ensure_last_mid_at_schema_column,
+    ensure_mid_checklist_data_table as ensure_mid_checklist_data_schema_table,
+    ensure_open_checklist_media_table as ensure_open_checklist_media_schema_table,
     ensure_shift_audit_columns as ensure_shift_audit_schema_columns,
     ensure_shift_status_column as ensure_shift_status_schema_column,
     ensure_shift_status_index as ensure_shift_status_schema_index,
@@ -119,6 +122,9 @@ def _prepare_dashboard_schema() -> None:
         _ensure_shift_columns(conn)
         _ensure_close_residual_columns(conn)
         close_stale_open_shifts_schema(conn)
+        ensure_last_mid_at_schema_column(conn)
+        ensure_open_checklist_media_schema_table(conn)
+        ensure_mid_checklist_data_schema_table(conn)
     finally:
         conn.close()
 

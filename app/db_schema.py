@@ -326,6 +326,104 @@ def ensure_shift_status_index(
         raise
 
 
+def ensure_last_mid_at_column(
+    conn: sqlite3.Connection,
+) -> None:
+    """Добавляет колонку last_mid_at в таблицу shifts.
+
+    Args:
+        conn: Подключение SQLite.
+
+    Returns:
+        None.
+    """
+    if not _table_exists(conn, "shifts"):
+        return
+    try:
+        columns = _table_columns(conn, "shifts")
+        if "last_mid_at" not in columns:
+            conn.execute("ALTER TABLE shifts ADD COLUMN last_mid_at TEXT")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration ensure_last_mid_at_column failed")
+        raise
+
+
+def ensure_open_checklist_media_table(
+    conn: sqlite3.Connection,
+) -> None:
+    """Создаёт таблицу open_checklist_media, если её нет.
+
+    Args:
+        conn: Подключение SQLite.
+
+    Returns:
+        None.
+    """
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS open_checklist_media (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shift_id INTEGER NOT NULL,
+                item_index INTEGER NOT NULL,
+                item_label TEXT,
+                file_id TEXT,
+                file_unique_id TEXT,
+                mime_type TEXT,
+                created_at TEXT,
+                UNIQUE(shift_id, item_index)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_open_checklist_media_shift "
+            "ON open_checklist_media(shift_id)"
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration ensure_open_checklist_media_table failed")
+        raise
+
+
+def ensure_mid_checklist_data_table(
+    conn: sqlite3.Connection,
+) -> None:
+    """Создаёт таблицу mid_checklist_data, если её нет.
+
+    Args:
+        conn: Подключение SQLite.
+
+    Returns:
+        None.
+    """
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mid_checklist_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shift_id INTEGER NOT NULL,
+                key TEXT NOT NULL,
+                value REAL NOT NULL,
+                unit TEXT,
+                created_at TEXT,
+                UNIQUE(shift_id, key)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mid_checklist_data_shift "
+            "ON mid_checklist_data(shift_id)"
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration ensure_mid_checklist_data_table failed")
+        raise
+
+
 def close_stale_open_shifts(
     conn: sqlite3.Connection,
 ) -> None:

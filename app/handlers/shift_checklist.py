@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
 from app.checklist.callbacks import CHECKLIST_CALLBACK_PREFIX, parse_checklist_callback
-from app.checklist.data import CHECKLISTS
+from app.checklist.data import CHECKLISTS, MID_NUMERIC_INPUTS_BY_ITEM_TEXT, flat_checklist_items
 from app.checklist.ui import (
     build_checklist_keyboard,
     build_checklist_text,
@@ -14,6 +16,7 @@ from app.checklist.ui import (
     normalize_checklist_section,
 )
 from app.db import Database
+from app.handlers.states import MidShiftStates, OpenShiftStates
 from app.handlers.utils import build_shift_menu_keyboard, safe_answer_callback, safe_edit_text
 
 
@@ -160,6 +163,42 @@ async def checklist_callback(
         section_index = int(section_default_raw)
     active_section = normalize_checklist_section(checklist_type, section_index)
 
+    # Перехват фото-пункта в open checklist
+    if checklist_type == "open" and action == "item":
+        open_items = flat_checklist_items("open")
+        index_candidate = payload.value
+        if 0 <= index_candidate < len(open_items):
+            item_text_open = open_items[index_candidate]
+            if "фото холодильника" in item_text_open.lower():
+                await state.set_state(OpenShiftStates.waiting_photo)
+                await state.update_data(
+                    open_photo_item_index=index_candidate,
+                    open_photo_shift_id=shift_id,
+                )
+                await callback.message.answer(
+                    "📷 Отправьте фото холодильника (напитки, десерты, перцы)"
+                )
+                await _answer()
+                return
+
+    # Перехват числового пункта в mid checklist
+    if checklist_type == "mid" and action == "item":
+        mid_items = flat_checklist_items("mid")
+        index_candidate = payload.value
+        if 0 <= index_candidate < len(mid_items):
+            item_text_mid = mid_items[index_candidate]
+            if item_text_mid in MID_NUMERIC_INPUTS_BY_ITEM_TEXT:
+                cfg = MID_NUMERIC_INPUTS_BY_ITEM_TEXT[item_text_mid]
+                await state.set_state(MidShiftStates.waiting_numeric)
+                await state.update_data(
+                    mid_numeric_item_index=index_candidate,
+                    mid_numeric_shift_id=shift_id,
+                    mid_numeric_item_text=item_text_mid,
+                )
+                await callback.message.answer(str(cfg["prompt"]))
+                await _answer()
+                return
+
     toggled_to_done = False
     if action == "section":
         active_section = normalize_checklist_section(checklist_type, payload.value)
@@ -243,6 +282,10 @@ async def checklist_callback(
             )
             await _answer("Чек-лист завершён.")
             if just_completed:
+                await db.update_shift_last_mid(
+                    shift_id,
+                    datetime.now(timezone.utc).isoformat(),
+                )
                 await state.clear()
                 await callback.message.answer("✅ Чек-лист ведения смены завершён.")
             return

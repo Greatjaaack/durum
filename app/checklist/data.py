@@ -189,6 +189,14 @@ OPEN_CHECKLIST = _normalize_sections(_RAW_CONFIG.get("open_checklist"), "open_ch
 MID_CHECKLIST = _normalize_sections(_RAW_CONFIG.get("mid_checklist"), "mid_checklist")
 CLOSE_CHECKLIST = _normalize_sections(_RAW_CONFIG.get("close_checklist"), "close_checklist")
 
+MID_NUMERIC_INPUTS: dict[str, dict[str, object]] = _normalize_residual_inputs(
+    _RAW_CONFIG.get("mid_numeric_inputs") or {}
+)
+MID_NUMERIC_INPUTS_BY_ITEM_TEXT: dict[str, dict[str, object]] = {
+    str(cfg.get("checklist_item") or label): cfg
+    for label, cfg in MID_NUMERIC_INPUTS.items()
+}
+
 CLOSE_SECTION_EMOJI_BY_TITLE = _normalize_emoji_map(
     _RAW_CONFIG.get("close_section_emoji_by_title"),
 )
@@ -208,6 +216,19 @@ CHECKLISTS = {
     "mid": MID_CHECKLIST,
     "close": CLOSE_CHECKLIST,
 }
+
+
+def flat_checklist_items(checklist_type: str) -> list[str]:
+    """Возвращает плоский список текстов всех пунктов чек-листа.
+
+    Args:
+        checklist_type: Тип чек-листа.
+
+    Returns:
+        Список текстов пунктов по порядку.
+    """
+    sections = CHECKLISTS.get(checklist_type, [])
+    return [str(item) for section in sections for item in section["items"]]
 
 CHECKLIST_TITLES = _normalize_titles(_RAW_CONFIG.get("checklist_titles"))
 
