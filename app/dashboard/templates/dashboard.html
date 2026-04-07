@@ -30,21 +30,43 @@
 </section>
 {% endif %}
 
-<section class="kpi-grid compact">
-  <article class="kpi-card">
-    <div class="kpi-card__label">Смен</div>
-    <div class="kpi-card__value">{{ kpi.shifts_count }}</div>
-  </article>
-  <article class="kpi-card {{ kpi.avg_close_class }}">
-    <div class="kpi-card__label">Среднее закрытие</div>
-    <div class="kpi-card__value">{{ kpi.avg_close_label }}</div>
-  </article>
-  <article class="kpi-card {{ kpi.checklist_completion_class }}">
-    <div class="kpi-card__label">Заполнение</div>
-    <div class="kpi-card__value">{{ kpi.checklist_completion_label }}</div>
-  </article>
+<!-- График работы -->
+<section class="card schedule-matrix-card">
+  <div class="card__header">
+    <h2>📅 График работы</h2>
+    <span class="muted">{{ period_label }}</span>
+  </div>
+  {% if schedule_matrix.dates %}
+  <div class="table-wrap">
+    <table class="schedule-table">
+      <thead>
+        <tr>
+          <th class="col-employee-name">Сотрудник</th>
+          {% for label in schedule_matrix.date_labels %}
+          <th class="col-date">{{ label }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for emp in schedule_matrix.employees %}
+        <tr>
+          <td class="cell-employee-name">{{ emp }}</td>
+          {% for date in schedule_matrix.dates %}
+          <td class="cell-worked {% if schedule_matrix.matrix[emp][date] %}worked{% endif %}">
+            {% if schedule_matrix.matrix[emp][date] %}✓{% else %}—{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">Нет данных за выбранный период</p>
+  {% endif %}
 </section>
 
+<!-- Остатки и сотрудники -->
 <section class="grid-2">
   <article class="card">
     <div class="card__header">
@@ -55,24 +77,20 @@
         <thead>
           <tr>
             <th>Позиция</th>
-            <th>Текущее</th>
-            <th>Среднее</th>
-            <th>Δ %</th>
+            <th>Значение</th>
           </tr>
         </thead>
         <tbody>
           {% if residuals %}
           {% for row in residuals %}
-          <tr class="{% if row.is_anomaly %}warn{% endif %}">
+          <tr>
             <td>{{ row.item_label }}</td>
             <td>{{ row.current_label }} {{ row.unit }}</td>
-            <td>{{ row.avg_label }} {{ row.unit }}</td>
-            <td class="{% if row.is_anomaly %}anomaly-cell{% endif %}">{{ row.deviation_label }}</td>
           </tr>
           {% endfor %}
           {% else %}
           <tr>
-            <td colspan="4">Нет данных за выбранный период</td>
+            <td colspan="2">Нет данных за выбранный период</td>
           </tr>
           {% endif %}
         </tbody>
@@ -90,7 +108,7 @@
           <tr>
             <th>Сотрудник</th>
             <th>Смен</th>
-            <th>Ср. закрытие</th>
+            <th>Время на смене</th>
           </tr>
         </thead>
         <tbody>
@@ -99,7 +117,7 @@
           <tr>
             <td>{{ row.employee }}</td>
             <td>{{ row.shifts_count }}</td>
-            <td>{{ row.avg_close_label }}</td>
+            <td>{{ row.total_work_label }}</td>
           </tr>
           {% endfor %}
           {% else %}
@@ -113,33 +131,22 @@
   </article>
 </section>
 
-<section class="grid-2">
-  <article class="card">
-    <div class="card__header">
-      <h2>📈 Остатки по продуктам</h2>
-    </div>
-    {% if charts.residual_bar.labels %}
-    <div class="chart-wrap">
-      <canvas id="residualBarChart"></canvas>
-    </div>
-    {% else %}
-    <p class="muted">Нет данных за выбранный период</p>
-    {% endif %}
-  </article>
-  <article class="card">
-    <div class="card__header">
-      <h2>⏱ Время закрытия смен</h2>
-    </div>
-    {% if charts.close_line.labels %}
-    <div class="chart-wrap">
-      <canvas id="closeDurationChart"></canvas>
-    </div>
-    {% else %}
-    <p class="muted">Нет данных за выбранный период</p>
-    {% endif %}
-  </article>
+<!-- Хронология смен -->
+<section class="card">
+  <div class="card__header">
+    <h2>📅 Открытие и закрытие смен</h2>
+    <span class="muted">{{ period_label }}</span>
+  </div>
+  {% if charts.gantt.labels %}
+  <div class="chart-wrap chart-wrap--gantt">
+    <canvas id="ganttChart"></canvas>
+  </div>
+  {% else %}
+  <p class="muted">Нет данных за выбранный период</p>
+  {% endif %}
 </section>
 
+<!-- Таблица смен -->
 <section class="card">
   <div class="card__header">
     <h2>⏱ Смены</h2>
@@ -151,31 +158,30 @@
           <th class="col-id">ID</th>
           <th>Дата</th>
           <th>Сотрудник</th>
-          <th>Открытие</th>
-          <th>Закрытие</th>
-          <th>Длительность</th>
-          <th>Закрытие чек-листа</th>
-          <th>Статус чек-листа</th>
-          <th>Фото чек-листа</th>
+          <th>Откр. начало</th>
+          <th>Откр. конец</th>
+          <th>Откр. длит.</th>
+          <th>Закр. начало</th>
+          <th>Закр. конец</th>
+          <th>Закр. длит.</th>
+          <th>Итого смена</th>
+          <th>Фото</th>
         </tr>
       </thead>
       <tbody>
         {% if shifts %}
         {% for row in shifts %}
-        <tr class="{% if row.has_checklist_error %}warn{% endif %}">
+        <tr class="{{ row.row_class }}">
           <td class="cell-id">#{{ row.id }}</td>
           <td class="cell-date">{{ row.date_label }}</td>
           <td class="cell-employee">{{ row.employee }}</td>
+          <td class="cell-time">{{ row.open_started_at }}</td>
           <td class="cell-time">{{ row.opened_at }}</td>
+          <td class="cell-duration">{{ row.opening_duration_label }}</td>
+          <td class="cell-time">{{ row.close_started_at_label }}</td>
           <td class="cell-time">{{ row.closed_at }}</td>
-          <td class="cell-duration">{{ row.duration_label }}</td>
           <td class="cell-duration">{{ row.close_duration_label }}</td>
-          <td class="checklist-status">
-            <span class="status-main badge {{ row.close_status_class }}">{{ row.close_status_summary }}</span>
-            {% if row.close_status_labels %}
-            <span class="status-details">{{ row.close_status_labels | join(" · ") }}</span>
-            {% endif %}
-          </td>
+          <td class="cell-duration">{{ row.work_duration_label }}</td>
           <td class="media-cell">
             {% if row.close_media_items %}
             <div class="media-list">
@@ -202,7 +208,7 @@
         {% endfor %}
         {% else %}
         <tr>
-          <td colspan="9">Нет данных за выбранный период</td>
+          <td colspan="11">Нет данных за выбранный период</td>
         </tr>
         {% endif %}
       </tbody>

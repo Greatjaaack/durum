@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Сотрудники · Durum{% endblock %}
+
+{% block content %}
+
+<!-- Список сотрудников -->
+<section class="card">
+  <div class="card__header">
+    <h2>👥 Сотрудники</h2>
+    <span class="muted">Назначьте имя и управляйте активностью</span>
+  </div>
+  {% if employees %}
+  <div class="table-wrap">
+    <table class="emp-table">
+      <thead>
+        <tr>
+          <th>Telegram ID</th>
+          <th>Имя в системе</th>
+          <th>Отображаемое имя</th>
+          <th>Смен</th>
+          <th>Статус</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for emp in employees %}
+        <tr class="{% if not emp.is_active %}row-inactive{% endif %}">
+          <form method="post" action="/dashboard/employees/profile" style="display:contents">
+            <td class="cell-id">{{ emp.telegram_id }}</td>
+            <td>{{ emp.raw_name }}</td>
+            <td>
+              <input
+                type="text"
+                name="display_name"
+                value="{{ emp.display_name }}"
+                placeholder="Имя сотрудника"
+                class="input-inline"
+                form="form-emp-{{ emp.telegram_id }}"
+              />
+            </td>
+            <td>{{ emp.shifts_count }}</td>
+            <td>
+              <select name="is_active" form="form-emp-{{ emp.telegram_id }}" class="select-inline">
+                <option value="1" {% if emp.is_active %}selected{% endif %}>Активен</option>
+                <option value="0" {% if not emp.is_active %}selected{% endif %}>Скрыт</option>
+              </select>
+            </td>
+            <td>
+              <input type="hidden" name="telegram_id" value="{{ emp.telegram_id }}" form="form-emp-{{ emp.telegram_id }}" />
+              <button type="submit" form="form-emp-{{ emp.telegram_id }}" class="btn-small">Сохранить</button>
+            </td>
+          </form>
+          <form id="form-emp-{{ emp.telegram_id }}" method="post" action="/dashboard/employees/profile" style="display:none"></form>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">Сотрудники появятся после первой смены.</p>
+  {% endif %}
+</section>
+
+<!-- Назначение смены -->
+<section class="card">
+  <div class="card__header">
+    <h2>📝 Назначить смену</h2>
+  </div>
+  <form method="post" action="/dashboard/employees/schedule" class="filters__grid schedule-form">
+    <label class="field">
+      <span>Сотрудник</span>
+      <select name="employee_telegram_id">
+        {% for emp in schedule.employees %}
+        {% if emp.is_active %}
+        <option value="{{ emp.telegram_id }}">{{ emp.display_name or emp.telegram_id }}</option>
+        {% endif %}
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field">
+      <span>Дата</span>
+      <input type="date" name="date" required />
+    </label>
+    <label class="field">
+      <span>Тип смены</span>
+      <select name="shift_type" id="shift-type-select">
+        <option value="full">Полная</option>
+        <option value="half">Половинная</option>
+      </select>
+    </label>
+    <label class="field" id="time-start-field" style="display:none">
+      <span>Начало</span>
+      <input type="time" name="start_time" />
+    </label>
+    <label class="field" id="time-end-field" style="display:none">
+      <span>Конец</span>
+      <input type="time" name="end_time" />
+    </label>
+    <input type="hidden" name="action" value="upsert" />
+    <div class="filters__actions">
+      <button type="submit">Назначить</button>
+    </div>
+  </form>
+</section>
+
+<!-- Матрица расписания -->
+<section class="card">
+  <div class="card__header">
+    <h2>📅 {{ month_name }} {{ current_year }}</h2>
+    <div class="month-nav">
+      <a href="/dashboard/employees?year={{ prev_year }}&month={{ prev_month }}" class="link-btn">◀</a>
+      <a href="/dashboard/employees?year={{ next_year }}&month={{ next_month }}" class="link-btn">▶</a>
+    </div>
+  </div>
+  {% if schedule.employees %}
+  <div class="table-wrap">
+    <table class="schedule-table schedule-table--month">
+      <thead>
+        <tr>
+          <th class="col-employee-name">Сотрудник</th>
+          {% for label in schedule.day_labels %}
+          <th class="col-day">{{ label }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for emp in schedule.employees %}
+        {% if emp.is_active %}
+        <tr>
+          <td class="cell-employee-name">{{ emp.display_name or emp.telegram_id }}</td>
+          {% for day in schedule.days %}
+          {% set entry = schedule.entries.get(emp.telegram_id, {}).get(day) %}
+          <td
+            class="cell-schedule {% if entry %}has-entry{% if entry.shift_type == 'half' %} half-shift{% endif %}{% endif %}"
+            title="{% if entry %}{{ entry.shift_type }}{% if entry.start_time %}: {{ entry.start_time }}–{{ entry.end_time }}{% endif %}{% endif %}"
+          >
+            {% if entry %}
+              {% if entry.shift_type == 'half' %}½{% else %}✓{% endif %}
+            {% else %}—{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">Добавьте сотрудников, чтобы видеть расписание.</p>
+  {% endif %}
+</section>
+
+<script>
+  (function () {
+    const sel = document.getElementById("shift-type-select");
+    const startF = document.getElementById("time-start-field");
+    const endF = document.getElementById("time-end-field");
+    function toggle() {
+      const isHalf = sel.value === "half";
+      startF.style.display = isHalf ? "" : "none";
+      endF.style.display = isHalf ? "" : "none";
+    }
+    sel.addEventListener("change", toggle);
+    toggle();
+  })();
+</script>
+
+{% endblock %}

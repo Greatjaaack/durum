@@ -424,6 +424,124 @@ def ensure_mid_checklist_data_table(
         raise
 
 
+def ensure_camera_tables(
+    conn: sqlite3.Connection,
+) -> None:
+    """Создаёт таблицы camera_devices и camera_videos, если их нет.
+
+    Args:
+        conn: Подключение SQLite.
+
+    Returns:
+        None.
+    """
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS camera_devices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                did TEXT UNIQUE NOT NULL,
+                name TEXT,
+                model TEXT,
+                localip TEXT,
+                is_online INTEGER DEFAULT 0,
+                firmware TEXT,
+                last_seen TEXT,
+                synced_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS camera_videos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_did TEXT NOT NULL,
+                start_time TEXT NOT NULL,
+                end_time TEXT,
+                duration_seconds INTEGER,
+                video_url TEXT,
+                thumbnail_url TEXT,
+                event_type TEXT,
+                synced_at TEXT NOT NULL,
+                UNIQUE(device_did, start_time)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_camera_videos_device "
+            "ON camera_videos(device_did)"
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration ensure_camera_tables failed")
+        raise
+
+
+def ensure_employee_profiles_table(
+    conn: sqlite3.Connection,
+) -> None:
+    """Создаёт таблицу employee_profiles, если её нет.
+
+    Args:
+        conn: Подключение SQLite.
+
+    Returns:
+        None.
+    """
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS employee_profiles (
+                telegram_id INTEGER PRIMARY KEY,
+                display_name TEXT NOT NULL DEFAULT '',
+                is_active INTEGER NOT NULL DEFAULT 1
+            )
+            """
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration ensure_employee_profiles_table failed")
+        raise
+
+
+def ensure_employee_schedule_entries_table(
+    conn: sqlite3.Connection,
+) -> None:
+    """Создаёт таблицу employee_schedule_entries, если её нет.
+
+    Args:
+        conn: Подключение SQLite.
+
+    Returns:
+        None.
+    """
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS employee_schedule_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_telegram_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                shift_type TEXT NOT NULL DEFAULT 'full',
+                start_time TEXT,
+                end_time TEXT,
+                UNIQUE(employee_telegram_id, date)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_schedule_entries_date "
+            "ON employee_schedule_entries(date)"
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration ensure_employee_schedule_entries_table failed")
+        raise
+
+
 def close_stale_open_shifts(
     conn: sqlite3.Connection,
 ) -> None:

@@ -11,15 +11,24 @@ from urllib.parse import urlencode
 from urllib.request import Request as URLRequest
 from urllib.request import urlopen
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.dashboard.service import DashboardFilters, build_dashboard_payload
+from app.dashboard.employees_service import (
+    delete_schedule_entry,
+    fetch_all_employees_with_profiles,
+    fetch_schedule_matrix,
+    upsert_employee_profile,
+    upsert_schedule_entry,
+)
+from app.dashboard.service import DashboardFilters, build_dashboard_payload, get_active_shift
 from app.db_schema import (
     close_stale_open_shifts as close_stale_open_shifts_schema,
     ensure_close_residual_columns as ensure_close_residual_schema_columns,
+    ensure_employee_profiles_table as ensure_employee_profiles_schema_table,
+    ensure_employee_schedule_entries_table as ensure_employee_schedule_entries_schema_table,
     ensure_last_mid_at_column as ensure_last_mid_at_schema_column,
     ensure_mid_checklist_data_table as ensure_mid_checklist_data_schema_table,
     ensure_open_checklist_media_table as ensure_open_checklist_media_schema_table,
@@ -125,6 +134,8 @@ def _prepare_dashboard_schema() -> None:
         ensure_last_mid_at_schema_column(conn)
         ensure_open_checklist_media_schema_table(conn)
         ensure_mid_checklist_data_schema_table(conn)
+        ensure_employee_profiles_schema_table(conn)
+        ensure_employee_schedule_entries_schema_table(conn)
     finally:
         conn.close()
 
@@ -274,10 +285,11 @@ def dashboard(
     conn = _connect()
     try:
         payload = build_dashboard_payload(conn, filters)
+        payload["active_shift"] = get_active_shift(conn)
     except Exception:
         logger.exception("Failed to build dashboard payload")
         payload = {
-            "kpi": None,
+            "schedule_matrix": {"dates": [], "date_labels": [], "employees": [], "matrix": {}},
             "shifts": [],
             "residuals": [],
             "employees": [],
@@ -286,15 +298,157 @@ def dashboard(
             "subtitle": "",
             "period_label": "",
             "error": "Не удалось загрузить данные дашборда.",
+            "active_shift": None,
         }
     finally:
         conn.close()
 
+    payload["active_tab"] = "dashboard"
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
         context=payload,
     )
+
+
+@app.get("/dashboard/employees")
+def employees_page(
+    request: Request,
+    year: int = Query(default=None),
+    month: int = Query(default=None),
+):
+    """Рендерит страницу управления сотрудниками.
+
+    Args:
+        request: Объект HTTP-запроса FastAPI.
+        year: Год для матрицы расписания.
+        month: Месяц для матрицы расписания.
+
+    Returns:
+        Jinja2 TemplateResponse.
+    """
+    now = datetime.now()
+    current_year = year or now.year
+    current_month = month or now.month
+
+    if current_month == 1:
+        prev_year, prev_month = current_year - 1, 12
+    else:
+        prev_year, prev_month = current_year, current_month - 1
+
+    if current_month == 12:
+        next_year, next_month = current_year + 1, 1
+    else:
+        next_year, next_month = current_year, current_month + 1
+
+    conn = _connect()
+    try:
+        employees = fetch_all_employees_with_profiles(conn)
+        schedule = fetch_schedule_matrix(conn, current_year, current_month)
+        active_shift = get_active_shift(conn)
+    except Exception:
+        logger.exception("Failed to build employees page payload")
+        employees = []
+        schedule = {"employees": [], "days": [], "entries": {}}
+        active_shift = None
+    finally:
+        conn.close()
+
+    month_names = [
+        "", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+        "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+    ]
+
+    return templates.TemplateResponse(
+        request=request,
+        name="employees.html",
+        context={
+            "employees": employees,
+            "schedule": schedule,
+            "current_year": current_year,
+            "current_month": current_month,
+            "month_name": month_names[current_month],
+            "prev_year": prev_year,
+            "prev_month": prev_month,
+            "next_year": next_year,
+            "next_month": next_month,
+            "active_tab": "employees",
+            "subtitle": "",
+            "active_shift": active_shift,
+        },
+    )
+
+
+@app.post("/dashboard/employees/profile")
+def update_employee_profile(
+    telegram_id: int = Form(...),
+    display_name: str = Form(default=""),
+    is_active: int = Form(default=1),
+):
+    """Обновляет профиль сотрудника.
+
+    Args:
+        telegram_id: Telegram ID сотрудника.
+        display_name: Отображаемое имя.
+        is_active: Флаг активности (1/0).
+
+    Returns:
+        HTTP-редирект на страницу сотрудников.
+    """
+    conn = _connect()
+    try:
+        upsert_employee_profile(conn, telegram_id, display_name.strip(), is_active)
+    except Exception:
+        logger.exception("Failed to update employee profile telegram_id=%s", telegram_id)
+    finally:
+        conn.close()
+    return RedirectResponse(url="/dashboard/employees", status_code=303)
+
+
+@app.post("/dashboard/employees/schedule")
+def update_employee_schedule(
+    employee_telegram_id: int = Form(...),
+    date: str = Form(...),
+    shift_type: str = Form(default="full"),
+    start_time: str = Form(default=""),
+    end_time: str = Form(default=""),
+    action: str = Form(default="upsert"),
+):
+    """Назначает или удаляет смену в расписании сотрудника.
+
+    Args:
+        employee_telegram_id: Telegram ID сотрудника.
+        date: Дата в формате YYYY-MM-DD.
+        shift_type: Тип смены (full/half).
+        start_time: Время начала (для half).
+        end_time: Время окончания (для half).
+        action: Действие (upsert/delete).
+
+    Returns:
+        HTTP-редирект на страницу сотрудников.
+    """
+    conn = _connect()
+    try:
+        if action == "delete":
+            delete_schedule_entry(conn, employee_telegram_id, date)
+        else:
+            upsert_schedule_entry(
+                conn,
+                employee_telegram_id,
+                date,
+                shift_type,
+                start_time.strip() or None,
+                end_time.strip() or None,
+            )
+    except Exception:
+        logger.exception(
+            "Failed to update schedule for telegram_id=%s date=%s",
+            employee_telegram_id,
+            date,
+        )
+    finally:
+        conn.close()
+    return RedirectResponse(url="/dashboard/employees", status_code=303)
 
 
 @app.get("/dashboard/media/{media_id}", name="dashboard_media")

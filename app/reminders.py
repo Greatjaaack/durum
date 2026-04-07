@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 from datetime import datetime, time, timedelta, timezone as _utc_tz
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
@@ -13,6 +16,33 @@ from app.config import Settings
 from app.db import Database
 
 logger = logging.getLogger(__name__)
+
+# Пути к camera_sync скрипту и его интерпретатору Python
+_CAMERA_SYNC_SCRIPT = Path(__file__).parent.parent / "camera_sync" / "sync_to_db.py"
+_CAMERA_SYNC_PYTHON = Path(__file__).parent.parent / "camera_sync" / "venv" / "bin" / "python"
+
+
+async def _run_camera_sync(db_path: Path) -> None:
+    """Запускает sync_to_db.py в отдельном процессе с venv камеры."""
+    if not _CAMERA_SYNC_SCRIPT.exists() or not _CAMERA_SYNC_PYTHON.exists():
+        logger.debug("camera_sync: скрипт или venv не найдены, пропускаем")
+        return
+    env = {**os.environ, "DB_PATH": str(db_path)}
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            str(_CAMERA_SYNC_PYTHON),
+            str(_CAMERA_SYNC_SCRIPT),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.warning("camera_sync завершился с ошибкой: %s", stderr.decode()[:500])
+        else:
+            logger.info("camera_sync: %s", stdout.decode().strip()[:300])
+    except Exception:
+        logger.exception("camera_sync: ошибка запуска процесса")
 
 # Текст напоминания о проверке хозов и чистоты.
 SUPPLIES_AND_CLEANLINESS_REMINDER_TEXT = (
@@ -352,6 +382,13 @@ def setup_scheduler(
             timezone=timezone,
         ),
         id="mid_checklist_reminder",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _run_camera_sync,
+        trigger=CronTrigger(minute=0, timezone=timezone),
+        args=[settings.db_path],
+        id="camera_sync",
         replace_existing=True,
     )
     return scheduler
