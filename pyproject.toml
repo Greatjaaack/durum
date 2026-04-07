@@ -15,6 +15,7 @@ fastapi = "^0.121.0"
 uvicorn = {version = "^0.38.0", extras = ["standard"]}
 jinja2 = "^3.1.6"
 pyyaml = "^6.0.2"
+python-multipart = "^0.0.9"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]

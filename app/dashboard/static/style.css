@@ -31,6 +31,13 @@ body {
   padding: 18px 26px 12px;
 }
 
+.topbar__row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
 .topbar__title {
   font-size: 28px;
   font-weight: 800;
@@ -41,6 +48,33 @@ body {
   margin-top: 4px;
   color: var(--muted);
   font-size: 15px;
+}
+
+.shift-active-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  background: #ecfdf5;
+  border: 1px solid #6ee7b7;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #065f46;
+}
+
+.shift-active-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  animation: pulse-dot 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.75); }
 }
 
 .layout {
@@ -294,6 +328,24 @@ tr.warn td:first-child {
   border-left: 3px solid #f87171;
 }
 
+/* Активная (незакрытая) смена */
+tr.row-shift-open {
+  background: #f0fdf4;
+}
+
+tr.row-shift-open td:first-child {
+  border-left: 3px solid #34d399;
+}
+
+/* Аномалия: статус CLOSED но нет времени закрытия */
+tr.row-shift-anomaly {
+  background: #fff7ed;
+}
+
+tr.row-shift-anomaly td:first-child {
+  border-left: 3px solid #fb923c;
+}
+
 .anomaly-cell {
   color: #b91c1c;
   font-weight: 700;
@@ -429,6 +481,132 @@ tr.warn td:first-child {
   border-radius: 10px;
   object-fit: contain;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+/* Tab navigation */
+.tab-nav {
+  display: flex;
+  gap: 4px;
+  padding: 0 20px;
+  border-bottom: 2px solid var(--line);
+  background: var(--card);
+}
+
+.tab-nav__link {
+  padding: 10px 18px;
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.12s;
+}
+
+.tab-nav__link.is-active {
+  color: var(--brand);
+  border-bottom-color: var(--brand);
+}
+
+/* Schedule matrix (dashboard) */
+.schedule-matrix-card {
+  overflow: hidden;
+}
+
+.schedule-table .col-date {
+  width: 56px;
+  text-align: center;
+  font-size: 11px;
+  white-space: pre-line;
+}
+
+.schedule-table .col-employee-name {
+  min-width: 120px;
+}
+
+.schedule-table .cell-employee-name {
+  font-weight: 600;
+}
+
+.schedule-table .cell-worked {
+  text-align: center;
+  color: var(--muted);
+}
+
+.schedule-table .cell-worked.worked {
+  color: var(--good-text);
+  font-weight: 700;
+}
+
+/* Schedule table (employees page) */
+.schedule-table--month .col-day {
+  width: 38px;
+  text-align: center;
+  font-size: 11px;
+  white-space: pre-line;
+  padding: 4px 2px;
+}
+
+.schedule-table--month .cell-schedule {
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 5px 2px;
+}
+
+.schedule-table--month .cell-schedule.has-entry {
+  color: var(--good-text);
+  font-weight: 700;
+}
+
+.schedule-table--month .cell-schedule.half-shift {
+  color: var(--caution-text);
+}
+
+.row-inactive td {
+  opacity: 0.45;
+}
+
+/* Tall chart for Gantt */
+.chart-wrap--tall {
+  height: 420px;
+  min-height: 360px;
+}
+
+/* Full-width Gantt chart */
+.chart-wrap--gantt {
+  height: 480px;
+  min-height: 360px;
+}
+
+/* Employee management page */
+.emp-table .input-inline {
+  width: 160px;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+.emp-table .select-inline {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+.btn-small {
+  min-height: 32px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+.schedule-form {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  align-items: end;
+}
+
+.month-nav {
+  display: flex;
+  gap: 6px;
 }
 
 @media (max-width: 1280px) {

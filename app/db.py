@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 from app.db_schema import (
     close_stale_open_shifts as close_stale_open_shifts_schema,
+    ensure_camera_tables as ensure_camera_tables_schema,
     ensure_close_residual_columns as ensure_close_residual_schema_columns,
     ensure_last_mid_at_column as ensure_last_mid_at_schema_column,
     ensure_mid_checklist_data_table as ensure_mid_checklist_data_schema_table,
@@ -169,6 +170,11 @@ class Database:
         with self._lock:
             ensure_mid_checklist_data_schema_table(self._conn)
 
+    def _ensure_camera_tables(self) -> None:
+        """Создаёт таблицы camera_devices и camera_videos."""
+        with self._lock:
+            ensure_camera_tables_schema(self._conn)
+
     async def init(self) -> None:
         """Инициализирует схему базы данных и миграции.
 
@@ -280,6 +286,7 @@ class Database:
         await asyncio.to_thread(self._ensure_last_mid_at_column)
         await asyncio.to_thread(self._ensure_open_checklist_media_table)
         await asyncio.to_thread(self._ensure_mid_checklist_data_table)
+        await asyncio.to_thread(self._ensure_camera_tables)
 
     async def create_shift(
         self,

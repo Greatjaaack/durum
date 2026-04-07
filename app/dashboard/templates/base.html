@@ -5,14 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}Durum Dashboard{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js" defer></script>
+  <script src="{{ url_for('static', path='chart.umd.min.js') }}" defer></script>
   <script src="{{ url_for('static', path='dashboard.js') }}" defer></script>
 </head>
 <body>
   <header class="topbar">
-    <div class="topbar__title">Durum Dashboard</div>
+    <div class="topbar__row">
+      <div class="topbar__title">Durum Dashboard</div>
+      {% if active_shift %}
+      <div class="shift-active-badge">
+        <span class="shift-active-dot"></span>
+        Смена открыта — {{ active_shift.employee }}{% if active_shift.open_time %} с {{ active_shift.open_time }}{% endif %}
+      </div>
+      {% endif %}
+    </div>
     {% if subtitle %}<div class="topbar__subtitle">{{ subtitle }}</div>{% endif %}
   </header>
+  <nav class="tab-nav">
+    <a href="/dashboard" class="tab-nav__link {% if active_tab == 'dashboard' %}is-active{% endif %}">📊 Операции</a>
+    <a href="/dashboard/employees" class="tab-nav__link {% if active_tab == 'employees' %}is-active{% endif %}">👥 Сотрудники</a>
+  </nav>
   <main class="layout">
     {% block content %}{% endblock %}
   </main>

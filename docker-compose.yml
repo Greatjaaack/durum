@@ -11,6 +11,8 @@ services:
     volumes:
       - ./data:/data
       - ./logs:/app/logs
+      - ./camera_sync/.env:/app/camera_sync/.env
+      - ./camera_sync/.xiaomi_session.json:/app/camera_sync/.xiaomi_session.json
     logging:
       driver: "json-file"
       options:

@@ -4,7 +4,6 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
-from statistics import mean
 
 from app.checklist.data import (
     CLOSE_CHECKLIST,
@@ -334,17 +333,52 @@ def _close_checklist_status_labels(
     return labels, done_total, total
 
 
+def _load_display_name_map(
+    conn: sqlite3.Connection,
+) -> dict[int, str]:
+    """Загружает маппинг telegram_id → display_name из employee_profiles.
+
+    Args:
+        conn: Подключение SQLite.
+
+    Returns:
+        Словарь telegram_id → display_name.
+    """
+    if not _table_exists(conn, "employee_profiles"):
+        return {}
+    rows = conn.execute(
+        "SELECT telegram_id, display_name FROM employee_profiles WHERE display_name != ''"
+    ).fetchall()
+    return {int(row["telegram_id"]): str(row["display_name"]) for row in rows}
+
+
 def _coalesce_employee(
     row: sqlite3.Row,
+    name_map: dict[int, str] | None = None,
 ) -> str:
     """Возвращает имя сотрудника из строки смены.
 
     Args:
         row: Строка таблицы shifts.
+        name_map: Маппинг telegram_id → display_name.
 
     Returns:
         Имя сотрудника.
     """
+    employee_id_raw = None
+    try:
+        employee_id_raw = row["employee_id"]
+    except (IndexError, KeyError):
+        pass
+
+    if name_map and employee_id_raw is not None:
+        try:
+            display = name_map.get(int(employee_id_raw))
+            if display:
+                return display
+        except (TypeError, ValueError):
+            pass
+
     opened_by = str(row["opened_by"] or "").strip()
     if opened_by:
         return opened_by
@@ -385,6 +419,7 @@ def _fetch_shifts(
         s.id,
         s.date,
         s.employee,
+        s.employee_id,
         s.open_time,
         s.close_time,
         s.opened_at,
@@ -646,25 +681,46 @@ def _build_shift_models(
     shifts_rows: list[sqlite3.Row],
     checklist_state: dict[int, dict[str, set[int]]],
     close_media_by_shift: dict[int, list[dict[str, object]]],
+    name_map: dict[int, str] | None = None,
 ) -> list[dict[str, object]]:
     """Формирует модели смен для таблицы.
 
     Args:
         shifts_rows: Сырые строки смен.
         checklist_state: Состояния чек-листов по сменам.
+        close_media_by_shift: Фото закрытия по сменам.
+        name_map: Маппинг telegram_id → display_name.
 
     Returns:
         Список моделей смен.
     """
+    if name_map is None:
+        name_map = {}
+
     models: list[dict[str, object]] = []
     for row in shifts_rows:
         shift_id = int(row["id"])
         status_raw = str(row["status"] or "").strip().upper()
-        opened_raw = str(row["opened_at"] or row["open_time"] or "")
-        closed_raw = str(row["closed_at"] or row["close_time"] or "")
 
+        # Время начала открытия (когда сотрудник начал процесс открытия)
+        open_started_raw = str(row["open_time"] or "").strip()
+        open_started_dt = _parse_iso_datetime(open_started_raw)
+
+        # Время конца открытия (когда смена была официально открыта)
+        opened_raw = str(row["opened_at"] or row["open_time"] or "")
         opened_dt = _parse_iso_datetime(opened_raw)
+
+        # Время закрытия
+        closed_raw = str(row["closed_at"] or row["close_time"] or "")
         closed_dt = _parse_iso_datetime(closed_raw)
+
+        # Длительность процесса открытия
+        opening_duration_minutes = _duration_minutes(open_started_dt, opened_dt)
+
+        # Общая длительность смены (с момента начала открытия до закрытия)
+        work_duration_minutes = _duration_minutes(open_started_dt, closed_dt)
+
+        # Для совместимости: общий duration от opened_at до closed_at
         duration_minutes = _duration_minutes(opened_dt, closed_dt)
 
         close_started_raw = str(row["close_started_at"] or "").strip()
@@ -692,18 +748,40 @@ def _build_shift_models(
         close_status_details = close_status_labels if is_closed_shift else []
         media_items = close_media_by_shift.get(shift_id, [])
 
+        employee_name = _coalesce_employee(row, name_map)
+
+        # Определяем аномалии строки
+        if status_raw == "OPEN":
+            row_class = "row-shift-open"
+        elif status_raw == "CLOSED" and not closed_raw:
+            row_class = "row-shift-anomaly"
+        else:
+            row_class = ""
+
         models.append(
             {
                 "id": shift_id,
                 "date_label": _fmt_date(str(row["date"] or "")),
-                "employee": _coalesce_employee(row),
+                "date_raw": str(row["date"] or ""),
+                "employee": employee_name,
                 "status": status_raw or "—",
+                "row_class": row_class,
+                # Открытие
+                "open_started_at": _fmt_time(open_started_raw),
                 "opened_at": _fmt_time(opened_raw),
+                "opening_duration_minutes": opening_duration_minutes,
+                "opening_duration_label": format_duration(opening_duration_minutes),
+                # Закрытие
+                "close_started_at_label": _fmt_time(close_started_raw),
                 "closed_at": _fmt_time(closed_raw),
-                "duration_minutes": duration_minutes,
-                "duration_label": format_duration(duration_minutes),
                 "close_duration_minutes": close_duration_minutes,
                 "close_duration_label": format_duration(close_duration_minutes),
+                # Итого смена
+                "duration_minutes": duration_minutes,
+                "duration_label": format_duration(duration_minutes),
+                "work_duration_minutes": work_duration_minutes,
+                "work_duration_label": format_duration(work_duration_minutes),
+                # Чек-лист (сохраняем для совместимости)
                 "close_checklist_done": close_done,
                 "close_checklist_total": close_total,
                 "close_status_labels": close_status_details,
@@ -712,6 +790,12 @@ def _build_shift_models(
                 "has_checklist_error": has_checklist_error,
                 "close_media_count": len(media_items),
                 "close_media_items": media_items,
+                # Сырые данные для Gantt
+                "open_time_raw": open_started_raw,
+                "opened_at_raw": opened_raw,
+                "close_started_raw": close_started_raw,
+                "closed_at_raw": closed_raw,
+                "employee_raw": str(row["employee"] or ""),
             }
         )
     return models
@@ -719,83 +803,57 @@ def _build_shift_models(
 
 def _build_residual_analytics(
     residual_rows: list[sqlite3.Row],
-    residual_baseline: dict[str, float],
 ) -> list[dict[str, object]]:
-    """Строит упрощённую таблицу остатков.
+    """Строит таблицу остатков по последней дате.
+
+    Показывает только текущие значения из самого свежего дня в выборке.
 
     Args:
-        residual_rows: Остатки по выбранным сменам.
-        residual_baseline: Средние значения остатков.
+        residual_rows: Остатки по выбранным сменам (уже отсортированы по date DESC).
 
     Returns:
         Список строк для таблицы остатков.
     """
+    # Находим самую позднюю дату в остатках
+    max_date: str | None = None
+    for row in residual_rows:
+        date_val = str(row["date"] or "").strip()
+        if date_val and (max_date is None or date_val > max_date):
+            max_date = date_val
+
     latest_by_key: dict[str, sqlite3.Row] = {}
     for row in residual_rows:
+        if max_date and str(row["date"] or "").strip() != max_date:
+            continue
         item_key = str(row["item_key"] or "").strip()
         if not item_key or item_key in latest_by_key:
             continue
         latest_by_key[item_key] = row
 
     rows: list[dict[str, object]] = []
-    item_keys = set(residual_baseline.keys()) | set(latest_by_key.keys())
-    for item_key in sorted(item_keys):
-        baseline_avg = residual_baseline.get(item_key)
-        latest = latest_by_key.get(item_key)
-
-        if latest:
-            current_value = _residual_row_normalized_value(latest)
-            unit = _residual_row_normalized_unit(latest, item_key)
-            label = _humanize_residual_label(item_key, str(latest["item_label"] or ""))
-        else:
-            current_value = None
-            unit = RESIDUAL_UNITS.get(item_key, "")
-            label = _humanize_residual_label(item_key, None)
-
-        deviation_pct: float | None = None
-        is_anomaly = False
-        deviation_indicator = "•"
-        if current_value is not None and baseline_avg is not None and baseline_avg > 0:
-            deviation_pct = round(((current_value - baseline_avg) / baseline_avg) * 100, 1)
-            is_anomaly = _is_residual_anomaly(current_value, baseline_avg)
-            if deviation_pct > 0:
-                deviation_indicator = "🔺"
-            elif deviation_pct < 0:
-                deviation_indicator = "🔻"
-
+    for item_key in sorted(latest_by_key.keys()):
+        latest = latest_by_key[item_key]
+        current_value = _residual_row_normalized_value(latest)
+        unit = _residual_row_normalized_unit(latest, item_key)
+        label = _humanize_residual_label(item_key, str(latest["item_label"] or ""))
         rows.append(
             {
                 "item_key": item_key,
                 "item_label": label,
                 "current_value": current_value,
                 "current_label": _fmt_number(current_value),
-                "avg_value": baseline_avg,
-                "avg_label": _fmt_number(baseline_avg),
                 "unit": unit,
-                "deviation_pct": deviation_pct,
-                "deviation_indicator": deviation_indicator if deviation_pct is not None else "",
-                "deviation_label": (
-                    f"{deviation_indicator} {int(round(deviation_pct)):+d}%"
-                    if deviation_pct is not None
-                    else "—"
-                ),
-                "is_anomaly": is_anomaly,
             }
         )
 
-    rows.sort(
-        key=lambda row: (
-            not bool(row["is_anomaly"]),
-            str(row["item_label"]),
-        )
-    )
+    rows.sort(key=lambda r: str(r["item_label"]))
     return rows
 
 
 def _build_employee_analytics(
     shifts: list[dict[str, object]],
 ) -> list[dict[str, object]]:
-    """Строит упрощённую аналитику по сотрудникам.
+    """Строит аналитику по сотрудникам.
 
     Args:
         shifts: Список смен.
@@ -810,18 +868,18 @@ def _build_employee_analytics(
 
     rows: list[dict[str, object]] = []
     for employee, employee_shifts in grouped.items():
-        close_times = [
-            float(shift["close_duration_minutes"])
+        work_times = [
+            int(shift["work_duration_minutes"])
             for shift in employee_shifts
-            if shift["close_duration_minutes"] is not None
+            if shift["work_duration_minutes"] is not None
         ]
-        avg_close = int(round(mean(close_times))) if close_times else None
+        total_work_minutes = sum(work_times) if work_times else None
         rows.append(
             {
                 "employee": employee,
                 "shifts_count": len(employee_shifts),
-                "avg_close_minutes": avg_close,
-                "avg_close_label": format_duration(avg_close),
+                "total_work_minutes": total_work_minutes,
+                "total_work_label": format_duration(total_work_minutes),
             }
         )
 
@@ -834,56 +892,183 @@ def _build_employee_analytics(
     return rows
 
 
-def _build_kpi(
-    shifts: list[dict[str, object]],
+_RU_WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+
+
+def _build_work_schedule_matrix(
+    shifts_rows: list[sqlite3.Row],
+    name_map: dict[int, str],
 ) -> dict[str, object]:
-    """Собирает KPI-блок операционного дашборда.
+    """Строит матрицу «кто в какой день работал».
 
     Args:
-        shifts: Список смен.
+        shifts_rows: Сырые строки смен.
+        name_map: Маппинг telegram_id → display_name.
 
     Returns:
-        Словарь с тремя KPI.
+        Словарь: dates, date_labels, employees, matrix.
     """
-    close_times = [
-        float(row["close_duration_minutes"])
-        for row in shifts
-        if row["close_duration_minutes"] is not None
-    ]
-    avg_close = int(round(mean(close_times))) if close_times else None
+    date_employees: dict[str, set[str]] = {}
+    for row in shifts_rows:
+        date_val = str(row["date"] or "").strip()
+        if not date_val:
+            continue
+        employee_id_raw = None
+        try:
+            employee_id_raw = row["employee_id"]
+        except (IndexError, KeyError):
+            pass
+        employee_name: str
+        if employee_id_raw is not None:
+            try:
+                display = name_map.get(int(employee_id_raw))
+                if display:
+                    employee_name = display
+                else:
+                    employee_name = str(row["opened_by"] or row["employee"] or "—").strip()
+            except (TypeError, ValueError):
+                employee_name = str(row["opened_by"] or row["employee"] or "—").strip()
+        else:
+            employee_name = str(row["opened_by"] or row["employee"] or "—").strip()
 
-    checklist_rates: list[float] = []
-    for row in shifts:
-        total = int(row["close_checklist_total"])
-        done = int(row["close_checklist_done"])
-        if total > 0:
-            checklist_rates.append((done / total) * 100)
-    checklist_completion_pct = int(round(mean(checklist_rates))) if checklist_rates else 0
+        date_employees.setdefault(date_val, set()).add(employee_name)
 
-    if checklist_completion_pct >= 95:
-        checklist_completion_class = "kpi--good"
-    elif checklist_completion_pct >= 75:
-        checklist_completion_class = "kpi--warn"
-    else:
-        checklist_completion_class = "kpi--danger"
+    sorted_dates = sorted(date_employees.keys())
+    date_labels: list[str] = []
+    for date_val in sorted_dates:
+        try:
+            dt = datetime.strptime(date_val, "%Y-%m-%d")
+            wd = _RU_WEEKDAYS[dt.weekday()]
+            date_labels.append(f"{dt.strftime('%d.%m')} {wd}")
+        except ValueError:
+            date_labels.append(date_val)
 
-    if avg_close is None:
-        avg_close_class = ""
-    elif avg_close <= 20:
-        avg_close_class = "kpi--good"
-    elif avg_close <= 40:
-        avg_close_class = "kpi--warn"
-    else:
-        avg_close_class = "kpi--danger"
+    all_employees = sorted(
+        {emp for employees in date_employees.values() for emp in employees}
+    )
+
+    matrix: dict[str, dict[str, bool]] = {}
+    for emp in all_employees:
+        matrix[emp] = {date_val: emp in date_employees[date_val] for date_val in sorted_dates}
 
     return {
-        "shifts_count": len(shifts),
-        "avg_close_minutes": avg_close,
-        "avg_close_label": format_duration(avg_close),
-        "avg_close_class": avg_close_class,
-        "checklist_completion_pct": checklist_completion_pct,
-        "checklist_completion_label": f"{checklist_completion_pct}%",
-        "checklist_completion_class": checklist_completion_class,
+        "dates": sorted_dates,
+        "date_labels": date_labels,
+        "employees": all_employees,
+        "matrix": matrix,
+    }
+
+
+def _minutes_from_midnight(dt: datetime | None) -> int | None:
+    """Конвертирует datetime в минуты от полуночи.
+
+    Args:
+        dt: Дата-время.
+
+    Returns:
+        Минуты от полуночи или None.
+    """
+    if dt is None:
+        return None
+    return dt.hour * 60 + dt.minute
+
+
+def _clamp(value: int | None, lo: int, hi: int) -> int | None:
+    """Ограничивает значение диапазоном.
+
+    Args:
+        value: Значение.
+        lo: Нижняя граница.
+        hi: Верхняя граница.
+
+    Returns:
+        Зажатое значение или None.
+    """
+    if value is None:
+        return None
+    return max(lo, min(hi, value))
+
+
+def _fmt_tooltip_phase(
+    start_dt: datetime | None,
+    end_dt: datetime | None,
+) -> str:
+    """Форматирует подсказку фазы смены.
+
+    Args:
+        start_dt: Начало фазы.
+        end_dt: Конец фазы.
+
+    Returns:
+        Строка вида «HH:MM — HH:MM (X ч Y мин)».
+    """
+    if start_dt is None or end_dt is None:
+        return ""
+    mins = _duration_minutes(start_dt, end_dt)
+    return f"{start_dt.strftime('%H:%M')} — {end_dt.strftime('%H:%M')} ({format_duration(mins)})"
+
+
+def _build_gantt_chart_data(
+    shifts: list[dict[str, object]],
+) -> dict[str, object]:
+    """Строит данные для Gantt-диаграммы смен.
+
+    Args:
+        shifts: Список моделей смен (уже построенных).
+
+    Returns:
+        Словарь с данными для Chart.js floating bars.
+    """
+    GANTT_MIN = 480   # 08:00
+    GANTT_MAX = 1470  # 24:30
+
+    labels: list[str] = []
+    opening_blocks: list[list[int] | None] = []
+    operation_blocks: list[list[int] | None] = []
+    closing_blocks: list[list[int] | None] = []
+    tooltips: list[dict[str, str]] = []
+
+    # Идём от старых к новым для хронологии
+    for shift in reversed(shifts):
+        shift_id = shift["id"]
+        date_raw = str(shift.get("date_raw") or "")
+        employee = str(shift.get("employee") or shift.get("employee_raw") or "")
+        try:
+            dt_date = datetime.strptime(date_raw, "%Y-%m-%d")
+            date_label = [dt_date.strftime("%d.%m"), employee] if employee else dt_date.strftime("%d.%m")
+        except ValueError:
+            date_label = f"#{shift_id}"
+
+        open_started_dt = _parse_iso_datetime(str(shift.get("open_time_raw") or ""))
+        opened_dt = _parse_iso_datetime(str(shift.get("opened_at_raw") or ""))
+        close_started_dt = _parse_iso_datetime(str(shift.get("close_started_raw") or ""))
+        closed_dt = _parse_iso_datetime(str(shift.get("closed_at_raw") or ""))
+
+        def block(start: datetime | None, end: datetime | None) -> list[int] | None:
+            s = _clamp(_minutes_from_midnight(start), GANTT_MIN, GANTT_MAX)
+            e = _clamp(_minutes_from_midnight(end), GANTT_MIN, GANTT_MAX)
+            if s is None or e is None or e <= s:
+                return None
+            return [s, e]
+
+        labels.append(date_label)
+        opening_blocks.append(block(open_started_dt, opened_dt))
+        operation_blocks.append(block(opened_dt, close_started_dt))
+        closing_blocks.append(block(close_started_dt, closed_dt))
+        tooltips.append(
+            {
+                "opening": _fmt_tooltip_phase(open_started_dt, opened_dt),
+                "operation": _fmt_tooltip_phase(opened_dt, close_started_dt),
+                "closing": _fmt_tooltip_phase(close_started_dt, closed_dt),
+            }
+        )
+
+    return {
+        "labels": labels,
+        "opening_blocks": opening_blocks,
+        "operation_blocks": operation_blocks,
+        "closing_blocks": closing_blocks,
+        "tooltips": tooltips,
     }
 
 
@@ -902,34 +1087,36 @@ def _build_charts(
     """
     residual_labels: list[str] = []
     residual_current: list[float] = []
-    residual_avg: list[float] = []
     for row in residual_analytics:
-        if row["current_value"] is None and row["avg_value"] is None:
+        if row["current_value"] is None:
             continue
         residual_labels.append(str(row["item_label"]))
         residual_current.append(float(row["current_value"] or 0))
-        residual_avg.append(float(row["avg_value"] or 0))
-
-    shifts_timeline = sorted(shifts, key=lambda row: int(row["id"]))
-    close_labels: list[str] = []
-    close_values: list[float] = []
-    for row in shifts_timeline:
-        close_minutes = row["close_duration_minutes"]
-        if close_minutes is None:
-            continue
-        close_labels.append(f"#{row['id']}")
-        close_values.append(float(close_minutes))
 
     return {
         "residual_bar": {
             "labels": residual_labels,
             "current_values": residual_current,
-            "avg_values": residual_avg,
         },
-        "close_line": {
-            "labels": close_labels,
-            "values": close_values,
-        },
+        "gantt": _build_gantt_chart_data(shifts),
+    }
+
+
+def get_active_shift(conn: sqlite3.Connection) -> dict | None:
+    """Возвращает текущую открытую смену (если есть).
+
+    Returns:
+        Словарь с id, employee, open_time или None.
+    """
+    row = conn.execute(
+        "SELECT id, employee, open_time FROM shifts WHERE status = 'OPEN' ORDER BY open_time DESC LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": int(row["id"]),
+        "employee": str(row["employee"] or ""),
+        "open_time": _fmt_time(str(row["open_time"] or "")),
     }
 
 
@@ -946,25 +1133,23 @@ def build_dashboard_payload(
     Returns:
         Контекст для Jinja2.
     """
+    name_map = _load_display_name_map(conn)
     shifts_rows = _fetch_shifts(conn, filters)
     shift_ids = [int(row["id"]) for row in shifts_rows]
 
     checklist_state = _fetch_checklists_for_shifts(conn, shift_ids)
     residual_rows = _fetch_residuals_for_shifts(conn, shift_ids)
     close_media_by_shift = _fetch_close_media_for_shifts(conn, shift_ids)
-    residual_baseline = _fetch_residual_baseline_avg(conn)
 
     shifts = _build_shift_models(
         shifts_rows=shifts_rows,
         checklist_state=checklist_state,
         close_media_by_shift=close_media_by_shift,
+        name_map=name_map,
     )
-    residual_analytics = _build_residual_analytics(
-        residual_rows=residual_rows,
-        residual_baseline=residual_baseline,
-    )
+    residual_analytics = _build_residual_analytics(residual_rows)
     employee_analytics = _build_employee_analytics(shifts)
-    kpi = _build_kpi(shifts)
+    schedule_matrix = _build_work_schedule_matrix(shifts_rows, name_map)
     charts = _build_charts(residual_analytics, shifts)
 
     from_date = filters.date_from
@@ -982,7 +1167,7 @@ def build_dashboard_payload(
         period_label = "Все смены"
 
     return {
-        "kpi": kpi,
+        "schedule_matrix": schedule_matrix,
         "shifts": shifts,
         "residuals": residual_analytics,
         "employees": employee_analytics,
