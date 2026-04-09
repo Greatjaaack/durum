@@ -33,6 +33,7 @@ from app.db_schema import (
     ensure_mid_checklist_data_table as ensure_mid_checklist_data_schema_table,
     ensure_open_checklist_media_table as ensure_open_checklist_media_schema_table,
     ensure_shift_audit_columns as ensure_shift_audit_schema_columns,
+    ensure_shift_periodic_residuals_table as ensure_shift_periodic_residuals_schema_table,
     ensure_shift_status_column as ensure_shift_status_schema_column,
     ensure_shift_status_index as ensure_shift_status_schema_index,
 )
@@ -136,6 +137,7 @@ def _prepare_dashboard_schema() -> None:
         ensure_mid_checklist_data_schema_table(conn)
         ensure_employee_profiles_schema_table(conn)
         ensure_employee_schedule_entries_schema_table(conn)
+        ensure_shift_periodic_residuals_schema_table(conn)
     finally:
         conn.close()
 

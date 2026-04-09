@@ -29,6 +29,12 @@ class MidShiftStates(StatesGroup):
     waiting_numeric = State()
 
 
+class PeriodicResidualStates(StatesGroup):
+    """Состояния FSM для записи периодических остатков."""
+
+    collecting = State()
+
+
 class ProblemStates(StatesGroup):
     """Состояния FSM для фиксации проблем."""
 

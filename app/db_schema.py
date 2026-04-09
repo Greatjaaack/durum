@@ -573,3 +573,38 @@ def close_stale_open_shifts(
         conn.rollback()
         logger.exception("Migration close_stale_open_shifts failed")
         raise
+
+
+def ensure_shift_periodic_residuals_table(
+    conn: sqlite3.Connection,
+) -> None:
+    """Создаёт таблицу shift_periodic_residuals, если её нет.
+
+    Args:
+        conn: Подключение SQLite.
+
+    Returns:
+        None.
+    """
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS shift_periodic_residuals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shift_id INTEGER NOT NULL,
+                key TEXT NOT NULL,
+                value REAL NOT NULL,
+                unit TEXT,
+                recorded_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_periodic_residuals_shift "
+            "ON shift_periodic_residuals(shift_id)"
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration ensure_shift_periodic_residuals_table failed")
+        raise

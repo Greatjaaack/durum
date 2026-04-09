@@ -84,6 +84,14 @@ CLOSE_CHECKLIST_FIRST_REMINDER_OFFSET_MIN = 90
 # Смещение (в минутах) для второго напоминания после времени закрытия смены.
 CLOSE_CHECKLIST_SECOND_REMINDER_OFFSET_MIN = 105
 
+# Текст напоминания о записи периодических остатков.
+PERIODIC_RESIDUALS_REMINDER_TEXT = (
+    "⏰ Время записать остатки! Нажмите «📋 Остатки смены» или /residuals"
+)
+
+# Шаг часов для напоминания о периодических остатках.
+PERIODIC_RESIDUALS_HOUR_STEP = "*/2"
+
 
 def _time_with_offset(
     base_time: time,
@@ -382,6 +390,29 @@ def setup_scheduler(
             timezone=timezone,
         ),
         id="mid_checklist_reminder",
+        replace_existing=True,
+    )
+
+    async def remind_periodic_residuals() -> None:
+        """Напоминает записать периодические остатки каждые 2 часа.
+
+        Args:
+            Нет параметров.
+
+        Returns:
+            None.
+        """
+        logger.debug("Scheduler job: periodic_residuals_reminder")
+        await _send_to_active_employees(PERIODIC_RESIDUALS_REMINDER_TEXT)
+
+    scheduler.add_job(
+        remind_periodic_residuals,
+        trigger=CronTrigger(
+            minute=0,
+            hour=PERIODIC_RESIDUALS_HOUR_STEP,
+            timezone=timezone,
+        ),
+        id="periodic_residuals_reminder",
         replace_existing=True,
     )
     scheduler.add_job(

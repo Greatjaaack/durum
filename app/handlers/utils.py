@@ -16,6 +16,8 @@ from app.handlers.constants import (
     MENU_CLOSE_SHIFT,
     MENU_MID_SHIFT,
     MENU_OPEN_SHIFT,
+    MENU_RESIDUALS,
+    MENU_SHIFT_PHOTOS,
 )
 
 
@@ -39,6 +41,10 @@ def build_shift_menu_keyboard(
             [
                 KeyboardButton(text=MENU_MID_SHIFT),
                 KeyboardButton(text=MENU_CLOSE_SHIFT),
+            ],
+            [
+                KeyboardButton(text=MENU_RESIDUALS),
+                KeyboardButton(text=MENU_SHIFT_PHOTOS),
             ],
         ]
     else:

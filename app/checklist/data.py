@@ -232,6 +232,13 @@ def flat_checklist_items(checklist_type: str) -> list[str]:
 
 CHECKLIST_TITLES = _normalize_titles(_RAW_CONFIG.get("checklist_titles"))
 
+PERIODIC_RESIDUAL_INPUTS: dict[str, dict[str, object]] = _normalize_residual_inputs(
+    _RAW_CONFIG.get("periodic_residual_inputs") or {}
+)
+
+# Список позиций для последовательного опроса (сохраняет порядок YAML).
+PERIODIC_RESIDUAL_INPUTS_LIST: list[dict[str, object]] = list(PERIODIC_RESIDUAL_INPUTS.values())
+
 CLOSE_RESIDUAL_LABELS_BY_KEY = {
     str(config["key"]): str(config.get("checklist_item") or item_label)
     for item_label, config in CLOSE_RESIDUAL_INPUTS.items()

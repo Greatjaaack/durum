@@ -32,6 +32,26 @@ def _clamp_section_index(checklist_type: str, section_index: int) -> int:
     return max(0, min(section_index, sections_count - 1))
 
 
+def _wrap_label(text: str, max_len: int = 20) -> str:
+    """Переносит длинный текст кнопки на вторую строку по пробелу.
+
+    Args:
+        text: Исходный текст.
+        max_len: Максимальная длина первой строки.
+
+    Returns:
+        Текст с переносом или без изменений.
+    """
+    if len(text) <= max_len:
+        return text
+    # Ищем последний пробел до позиции max_len
+    cut = text.rfind(" ", 0, max_len)
+    if cut <= 0:
+        # Нет пробела — разбиваем по max_len
+        return text[:max_len] + "\n" + text[max_len:]
+    return text[:cut] + "\n" + text[cut + 1:]
+
+
 def _item_button_text(
     item_text: str,
     mark: str,

@@ -1207,6 +1207,75 @@ class Database:
         except (TypeError, ValueError):
             return None
 
+    async def get_all_open_checklist_media(
+        self,
+        shift_id: int,
+    ) -> list[dict[str, Any]]:
+        """Возвращает все фото открытия смены.
+
+        Args:
+            shift_id: Идентификатор смены.
+
+        Returns:
+            Список словарей с данными фото, отсортированных по item_index.
+        """
+        query = """
+        SELECT * FROM open_checklist_media
+        WHERE shift_id = ?
+        ORDER BY item_index
+        """
+        return await asyncio.to_thread(self._fetchall, query, (shift_id,))
+
+    async def insert_periodic_residual(
+        self,
+        *,
+        shift_id: int,
+        key: str,
+        value: float,
+        unit: str,
+        recorded_at: str,
+    ) -> None:
+        """Сохраняет запись периодического остатка.
+
+        Args:
+            shift_id: Идентификатор смены.
+            key: Ключ позиции.
+            value: Числовое значение.
+            unit: Единица измерения.
+            recorded_at: Время записи (ISO).
+
+        Returns:
+            None.
+        """
+        query = """
+        INSERT INTO shift_periodic_residuals (shift_id, key, value, unit, recorded_at)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        await asyncio.to_thread(
+            self._execute,
+            query,
+            (shift_id, key, value, unit, recorded_at),
+        )
+
+    async def get_periodic_residuals_for_shift(
+        self,
+        shift_id: int,
+    ) -> list[dict[str, Any]]:
+        """Возвращает периодические остатки смены.
+
+        Args:
+            shift_id: Идентификатор смены.
+
+        Returns:
+            Список словарей, отсортированных по recorded_at.
+        """
+        query = """
+        SELECT * FROM shift_periodic_residuals
+        WHERE shift_id = ?
+        ORDER BY recorded_at
+        """
+        return await asyncio.to_thread(self._fetchall, query, (shift_id,))
+
     async def close(self) -> None:
         """Закрывает подключение к базе данных.
 

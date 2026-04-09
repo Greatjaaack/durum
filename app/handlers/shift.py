@@ -19,6 +19,7 @@ from app.checklist.data import (
     CLOSE_RESIDUAL_INPUTS_BY_CHECKLIST_ITEM,
     CLOSE_SECTION_EMOJI_BY_TITLE,
     MID_NUMERIC_INPUTS_BY_ITEM_TEXT,
+    PERIODIC_RESIDUAL_INPUTS_LIST,
     flat_checklist_items,
 )
 from app.checklist.ui import (
@@ -35,9 +36,11 @@ from app.handlers.constants import (
     MENU_CLOSE_SHIFT,
     MENU_MID_SHIFT,
     MENU_OPEN_SHIFT,
+    MENU_RESIDUALS,
+    MENU_SHIFT_PHOTOS,
 )
 from app.handlers.shift_checklist import checklist_state_keys, restore_completed_indexes
-from app.handlers.states import CloseShiftStates, MidShiftStates, OpenShiftStates
+from app.handlers.states import CloseShiftStates, MidShiftStates, OpenShiftStates, PeriodicResidualStates
 from app.handlers.utils import (
     build_shift_menu_keyboard,
     employee_name,
@@ -3338,4 +3341,180 @@ async def close_wizard_media_input(
         finish_confirm=False,
         completed=completed,
         values=values,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Просмотр фото открытия смены
+# ---------------------------------------------------------------------------
+
+
+@shift_router.message(F.text == MENU_SHIFT_PHOTOS)
+async def shift_photos(
+    message: Message,
+    db: Database,
+    bot: Bot,
+) -> None:
+    """Отправляет фотографии, сделанные при открытии активной смены."""
+    if not message.from_user:
+        return
+
+    active_shift = await db.get_active_shift(message.from_user.id)
+    if not active_shift:
+        await message.answer("Нет открытой смены.")
+        return
+
+    shift_id = int(active_shift["id"])
+    media_list = await db.get_all_open_checklist_media(shift_id)
+    if not media_list:
+        await message.answer("Фотографии ещё не добавлены.")
+        return
+
+    for media in media_list:
+        file_id = str(media.get("file_id", ""))
+        caption = str(media.get("item_label", ""))
+        if not file_id:
+            continue
+        try:
+            await bot.send_photo(message.chat.id, file_id, caption=caption)
+        except Exception:
+            logger.exception(
+                "Не удалось отправить фото open_checklist_media id=%s", media.get("id")
+            )
+
+
+# ---------------------------------------------------------------------------
+# Периодические остатки (каждые 2 часа)
+# ---------------------------------------------------------------------------
+
+_PERIODIC_FSM_SHIFT_KEY = "periodic_shift_id"
+_PERIODIC_FSM_INDEX_KEY = "periodic_item_index"
+_PERIODIC_FSM_VALUES_KEY = "periodic_values"
+
+
+@shift_router.message(Command("residuals"))
+@shift_router.message(F.text == MENU_RESIDUALS)
+async def periodic_residuals_start(
+    message: Message,
+    state: FSMContext,
+    db: Database,
+) -> None:
+    """Запускает сбор периодических остатков."""
+    if not message.from_user:
+        return
+
+    active_shift = await db.get_active_shift(message.from_user.id)
+    if not active_shift:
+        await message.answer(
+            "Нет открытой смены.",
+            reply_markup=build_shift_menu_keyboard(is_shift_open=False),
+        )
+        return
+
+    if not PERIODIC_RESIDUAL_INPUTS_LIST:
+        await message.answer("Список позиций для остатков не настроен.")
+        return
+
+    await state.clear()
+    await state.set_state(PeriodicResidualStates.collecting)
+    await state.update_data(
+        **{
+            _PERIODIC_FSM_SHIFT_KEY: int(active_shift["id"]),
+            _PERIODIC_FSM_INDEX_KEY: 0,
+            _PERIODIC_FSM_VALUES_KEY: {},
+        }
+    )
+
+    first_item = PERIODIC_RESIDUAL_INPUTS_LIST[0]
+    await message.answer(
+        f"📋 Запись остатков (1/{len(PERIODIC_RESIDUAL_INPUTS_LIST)})\n\n"
+        f"{first_item['prompt']}"
+    )
+
+
+@shift_router.message(PeriodicResidualStates.collecting, F.text)
+async def periodic_residuals_collect(
+    message: Message,
+    state: FSMContext,
+    db: Database,
+) -> None:
+    """Принимает ввод текущей позиции периодических остатков."""
+    if not message.from_user or not message.text:
+        return
+
+    fsm_data = await state.get_data()
+    shift_id: int = int(fsm_data.get(_PERIODIC_FSM_SHIFT_KEY, 0))
+    item_index: int = int(fsm_data.get(_PERIODIC_FSM_INDEX_KEY, 0))
+    collected: dict[str, object] = dict(fsm_data.get(_PERIODIC_FSM_VALUES_KEY, {}))
+
+    if item_index >= len(PERIODIC_RESIDUAL_INPUTS_LIST):
+        await state.clear()
+        return
+
+    item_cfg = PERIODIC_RESIDUAL_INPUTS_LIST[item_index]
+    raw = message.text.strip().replace(",", ".")
+    try:
+        value = float(raw)
+    except ValueError:
+        await message.answer("Введите число.")
+        return
+
+    if value < 0:
+        await message.answer("Значение не может быть отрицательным.")
+        return
+
+    max_value = float(item_cfg.get("max_value", 1_000_000))
+    if value > max_value:
+        await message.answer(f"Слишком большое значение (максимум {max_value:.0f}).")
+        return
+
+    only_integer = bool(item_cfg.get("only_integer", False))
+    if only_integer and value != int(value):
+        await message.answer("Введите целое число.")
+        return
+
+    unit = str(item_cfg.get("unit", ""))
+    key = str(item_cfg.get("key", ""))
+    recorded_at = datetime.now(timezone.utc).isoformat()
+
+    await db.insert_periodic_residual(
+        shift_id=shift_id,
+        key=key,
+        value=value,
+        unit=unit,
+        recorded_at=recorded_at,
+    )
+
+    collected[key] = value
+    next_index = item_index + 1
+    await state.update_data(
+        **{
+            _PERIODIC_FSM_INDEX_KEY: next_index,
+            _PERIODIC_FSM_VALUES_KEY: collected,
+        }
+    )
+
+    if next_index < len(PERIODIC_RESIDUAL_INPUTS_LIST):
+        next_item = PERIODIC_RESIDUAL_INPUTS_LIST[next_index]
+        await message.answer(
+            f"📋 Запись остатков ({next_index + 1}/{len(PERIODIC_RESIDUAL_INPUTS_LIST)})\n\n"
+            f"{next_item['prompt']}"
+        )
+        return
+
+    # Все позиции собраны — показываем итог
+    await state.clear()
+    lines = ["✅ Остатки записаны:\n"]
+    for cfg in PERIODIC_RESIDUAL_INPUTS_LIST:
+        k = str(cfg.get("key", ""))
+        label = str(cfg.get("prompt", k))
+        u = str(cfg.get("unit", ""))
+        val = collected.get(k)
+        if val is not None:
+            val_f = float(val)
+            val_str = str(int(val_f)) if val_f == int(val_f) else str(val_f)
+            lines.append(f"• {label}: {val_str} {u}")
+    await message.answer(
+        "\n".join(lines),
+        reply_markup=build_shift_menu_keyboard(is_shift_open=True),
     )
