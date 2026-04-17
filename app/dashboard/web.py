@@ -5,6 +5,7 @@ import logging
 import os
 import sqlite3
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -30,6 +31,7 @@ from app.db_schema import (
     ensure_employee_profiles_table as ensure_employee_profiles_schema_table,
     ensure_employee_schedule_entries_table as ensure_employee_schedule_entries_schema_table,
     ensure_last_mid_at_column as ensure_last_mid_at_schema_column,
+    ensure_mid_started_at_column as ensure_mid_started_at_schema_column,
     ensure_mid_checklist_data_table as ensure_mid_checklist_data_schema_table,
     ensure_open_checklist_media_table as ensure_open_checklist_media_schema_table,
     ensure_shift_audit_columns as ensure_shift_audit_schema_columns,
@@ -127,12 +129,19 @@ def _prepare_dashboard_schema() -> None:
     Returns:
         None.
     """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(os.getenv("BOT_TIMEZONE", "UTC"))
+    today = datetime.now(tz).date().isoformat()
+
     conn = _connect()
     try:
         _ensure_shift_columns(conn)
         _ensure_close_residual_columns(conn)
-        close_stale_open_shifts_schema(conn)
+        close_stale_open_shifts_schema(conn, today=today)
         ensure_last_mid_at_schema_column(conn)
+        ensure_mid_started_at_schema_column(conn)
         ensure_open_checklist_media_schema_table(conn)
         ensure_mid_checklist_data_schema_table(conn)
         ensure_employee_profiles_schema_table(conn)
@@ -279,9 +288,15 @@ def dashboard(
     Returns:
         Jinja2 TemplateResponse.
     """
+    tz = ZoneInfo(os.getenv("BOT_TIMEZONE", "UTC"))
+    normalized_from = _normalize_date(date_from)
+    normalized_to = _normalize_date(date_to)
+    if not normalized_from:
+        normalized_from = datetime.now(tz).date().isoformat()
+
     filters = DashboardFilters(
-        date_from=_normalize_date(date_from),
-        date_to=_normalize_date(date_to),
+        date_from=normalized_from,
+        date_to=normalized_to,
     )
 
     conn = _connect()
@@ -295,7 +310,7 @@ def dashboard(
             "shifts": [],
             "residuals": [],
             "employees": [],
-            "charts": {},
+            "charts": {"gantt": {"labels": [], "datasets": []}, "residuals": {"labels": [], "current_values": []}},
             "filters": {"date_from": filters.date_from or "", "date_to": filters.date_to or ""},
             "subtitle": "",
             "period_label": "",
@@ -329,7 +344,7 @@ def employees_page(
     Returns:
         Jinja2 TemplateResponse.
     """
-    now = datetime.now()
+    now = datetime.now(ZoneInfo(os.getenv("BOT_TIMEZONE", "UTC")))
     current_year = year or now.year
     current_month = month or now.month
 
@@ -465,6 +480,37 @@ def dashboard_media(
     Returns:
         Бинарный ответ изображения.
     """
+    return _proxy_dashboard_media(media_id=media_id, table_name="close_checklist_media")
+
+
+@app.get("/dashboard/open-media/{media_id}", name="dashboard_open_media")
+def dashboard_open_media(
+    media_id: int,
+) -> Response:
+    """Проксирует фото открытия смены из Telegram для дашборда.
+
+    Args:
+        media_id: Идентификатор фото в таблице open_checklist_media.
+
+    Returns:
+        Бинарный ответ изображения.
+    """
+    return _proxy_dashboard_media(media_id=media_id, table_name="open_checklist_media")
+
+
+def _proxy_dashboard_media(
+    media_id: int,
+    table_name: str,
+) -> Response:
+    """Проксирует фото чек-листа из Telegram по таблице-источнику.
+
+    Args:
+        media_id: Идентификатор фото.
+        table_name: Название таблицы с media-метаданными.
+
+    Returns:
+        Бинарный ответ изображения.
+    """
     bot_token = _dashboard_bot_token()
     if not bot_token:
         raise HTTPException(status_code=503, detail="BOT_TOKEN is not configured")
@@ -473,9 +519,9 @@ def dashboard_media(
     try:
         try:
             row = conn.execute(
-                """
+                f"""
                 SELECT file_id, mime_type
-                FROM close_checklist_media
+                FROM {table_name}
                 WHERE id = ?
                 LIMIT 1
                 """,
@@ -505,10 +551,18 @@ def dashboard_media(
     except HTTPException:
         raise
     except (HTTPError, URLError, TimeoutError):
-        logger.exception("Failed to proxy checklist photo media_id=%s", media_id)
+        logger.exception(
+            "Failed to proxy checklist photo media_id=%s table=%s",
+            media_id,
+            table_name,
+        )
         raise HTTPException(status_code=502, detail="Failed to fetch photo from Telegram") from None
     except Exception:
-        logger.exception("Unexpected error while proxying checklist photo media_id=%s", media_id)
+        logger.exception(
+            "Unexpected error while proxying checklist photo media_id=%s table=%s",
+            media_id,
+            table_name,
+        )
         raise HTTPException(status_code=500, detail="Unexpected media proxy error") from None
 
     media_type = content_type or str(row["mime_type"] or "").strip() or "image/jpeg"

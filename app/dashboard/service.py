@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone as _utc_tz
 
 from app.checklist.data import (
     CLOSE_CHECKLIST,
@@ -136,6 +136,13 @@ def _parse_iso_datetime(
         return None
 
 
+def _to_utc(dt: datetime) -> datetime:
+    """Приводит datetime к UTC: aware остаётся, naive считается UTC."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=_utc_tz.utc)
+    return dt.astimezone(_utc_tz.utc)
+
+
 def _duration_minutes(
     start: datetime | None,
     end: datetime | None,
@@ -151,7 +158,7 @@ def _duration_minutes(
     """
     if not start or not end:
         return None
-    seconds = (end - start).total_seconds()
+    seconds = (_to_utc(end) - _to_utc(start)).total_seconds()
     if seconds < 0:
         return None
     return int(round(seconds / 60))
@@ -427,6 +434,8 @@ def _fetch_shifts(
         s.opened_by,
         s.close_started_at,
         s.close_duration_sec,
+        s.last_mid_at,
+        s.mid_started_at,
         s.status
     FROM shifts s
     {where_clause}
@@ -578,6 +587,48 @@ def _fetch_close_media_for_shifts(
     return result
 
 
+def _fetch_open_media_for_shifts(
+    conn: sqlite3.Connection,
+    shift_ids: list[int],
+) -> dict[int, list[dict[str, object]]]:
+    """Возвращает фото открытия по сменам.
+
+    Args:
+        conn: Подключение SQLite.
+        shift_ids: Список ID смен.
+
+    Returns:
+        Словарь: shift_id -> список фото.
+    """
+    if not shift_ids or not _table_exists(conn, "open_checklist_media"):
+        return {}
+
+    placeholders = ",".join("?" for _ in shift_ids)
+    rows = conn.execute(
+        f"""
+        SELECT id, shift_id, item_index, item_label, created_at
+        FROM open_checklist_media
+        WHERE shift_id IN ({placeholders})
+        ORDER BY shift_id DESC, item_index ASC, id DESC
+        """,
+        tuple(shift_ids),
+    ).fetchall()
+
+    result: dict[int, list[dict[str, object]]] = {}
+    for row in rows:
+        shift_id = int(row["shift_id"])
+        item_label = str(row["item_label"] or "Фото открытия")
+        result.setdefault(shift_id, []).append(
+            {
+                "media_id": int(row["id"]),
+                "item_label": item_label,
+                "item_short": _short_media_label(item_label),
+                "created_at": str(row["created_at"] or ""),
+            }
+        )
+    return result
+
+
 def _fetch_residual_baseline_avg(
     conn: sqlite3.Connection,
 ) -> dict[str, float]:
@@ -681,6 +732,7 @@ def _build_shift_models(
     shifts_rows: list[sqlite3.Row],
     checklist_state: dict[int, dict[str, set[int]]],
     close_media_by_shift: dict[int, list[dict[str, object]]],
+    open_media_by_shift: dict[int, list[dict[str, object]]],
     name_map: dict[int, str] | None = None,
 ) -> list[dict[str, object]]:
     """Формирует модели смен для таблицы.
@@ -689,6 +741,7 @@ def _build_shift_models(
         shifts_rows: Сырые строки смен.
         checklist_state: Состояния чек-листов по сменам.
         close_media_by_shift: Фото закрытия по сменам.
+        open_media_by_shift: Фото открытия по сменам.
         name_map: Маппинг telegram_id → display_name.
 
     Returns:
@@ -710,12 +763,21 @@ def _build_shift_models(
         opened_raw = str(row["opened_at"] or row["open_time"] or "")
         opened_dt = _parse_iso_datetime(opened_raw)
 
+        # Время начала и конца ведения смены
+        mid_started_raw = str(row["mid_started_at"] or "").strip()
+        mid_started_dt = _parse_iso_datetime(mid_started_raw)
+        last_mid_raw = str(row["last_mid_at"] or "").strip()
+        last_mid_dt = _parse_iso_datetime(last_mid_raw)
+
         # Время закрытия
         closed_raw = str(row["closed_at"] or row["close_time"] or "")
         closed_dt = _parse_iso_datetime(closed_raw)
 
         # Длительность процесса открытия
         opening_duration_minutes = _duration_minutes(open_started_dt, opened_dt)
+
+        # Длительность последнего ведения смены
+        mid_duration_minutes = _duration_minutes(mid_started_dt, last_mid_dt)
 
         # Общая длительность смены (с момента начала открытия до закрытия)
         work_duration_minutes = _duration_minutes(open_started_dt, closed_dt)
@@ -747,6 +809,7 @@ def _build_shift_models(
             close_status_class = "badge--neutral"
         close_status_details = close_status_labels if is_closed_shift else []
         media_items = close_media_by_shift.get(shift_id, [])
+        open_media_items = open_media_by_shift.get(shift_id, [])
 
         employee_name = _coalesce_employee(row, name_map)
 
@@ -771,6 +834,11 @@ def _build_shift_models(
                 "opened_at": _fmt_time(opened_raw),
                 "opening_duration_minutes": opening_duration_minutes,
                 "opening_duration_label": format_duration(opening_duration_minutes),
+                # Ведение
+                "mid_started_at": _fmt_time(mid_started_raw),
+                "last_mid_at": _fmt_time(last_mid_raw),
+                "mid_duration_minutes": mid_duration_minutes,
+                "mid_duration_label": format_duration(mid_duration_minutes),
                 # Закрытие
                 "close_started_at_label": _fmt_time(close_started_raw),
                 "closed_at": _fmt_time(closed_raw),
@@ -790,6 +858,8 @@ def _build_shift_models(
                 "has_checklist_error": has_checklist_error,
                 "close_media_count": len(media_items),
                 "close_media_items": media_items,
+                "open_media_count": len(open_media_items),
+                "open_media_items": open_media_items,
                 # Сырые данные для Gantt
                 "open_time_raw": open_started_raw,
                 "opened_at_raw": opened_raw,
@@ -803,13 +873,17 @@ def _build_shift_models(
 
 def _build_residual_analytics(
     residual_rows: list[sqlite3.Row],
+    conn: sqlite3.Connection,
 ) -> list[dict[str, object]]:
-    """Строит таблицу остатков по последней дате.
+    """Строит таблицу остатков по последней дате с детекцией аномалий.
 
     Показывает только текущие значения из самого свежего дня в выборке.
+    Значения, отклоняющиеся от исторического среднего в 0.5×–1.5×, помечаются
+    флагом is_anomaly.
 
     Args:
         residual_rows: Остатки по выбранным сменам (уже отсортированы по date DESC).
+        conn: Подключение SQLite для расчёта исторических средних.
 
     Returns:
         Список строк для таблицы остатков.
@@ -830,12 +904,16 @@ def _build_residual_analytics(
             continue
         latest_by_key[item_key] = row
 
+    baseline_avg = _fetch_residual_baseline_avg(conn)
+
     rows: list[dict[str, object]] = []
     for item_key in sorted(latest_by_key.keys()):
         latest = latest_by_key[item_key]
         current_value = _residual_row_normalized_value(latest)
         unit = _residual_row_normalized_unit(latest, item_key)
         label = _humanize_residual_label(item_key, str(latest["item_label"] or ""))
+        avg = baseline_avg.get(item_key, 0.0)
+        is_anomaly = _is_residual_anomaly(current_value, avg)
         rows.append(
             {
                 "item_key": item_key,
@@ -843,6 +921,7 @@ def _build_residual_analytics(
                 "current_value": current_value,
                 "current_label": _fmt_number(current_value),
                 "unit": unit,
+                "is_anomaly": is_anomaly,
             }
         )
 
@@ -1140,14 +1219,16 @@ def build_dashboard_payload(
     checklist_state = _fetch_checklists_for_shifts(conn, shift_ids)
     residual_rows = _fetch_residuals_for_shifts(conn, shift_ids)
     close_media_by_shift = _fetch_close_media_for_shifts(conn, shift_ids)
+    open_media_by_shift = _fetch_open_media_for_shifts(conn, shift_ids)
 
     shifts = _build_shift_models(
         shifts_rows=shifts_rows,
         checklist_state=checklist_state,
         close_media_by_shift=close_media_by_shift,
+        open_media_by_shift=open_media_by_shift,
         name_map=name_map,
     )
-    residual_analytics = _build_residual_analytics(residual_rows)
+    residual_analytics = _build_residual_analytics(residual_rows, conn)
     employee_analytics = _build_employee_analytics(shifts)
     schedule_matrix = _build_work_schedule_matrix(shifts_rows, name_map)
     charts = _build_charts(residual_analytics, shifts)

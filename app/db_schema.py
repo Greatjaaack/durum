@@ -67,10 +67,13 @@ def ensure_shift_status_column(
         columns = _table_columns(conn, "shifts")
         if "status" not in columns:
             conn.execute("ALTER TABLE shifts ADD COLUMN status TEXT NOT NULL DEFAULT 'OPEN'")
+        # Исправляем только те записи, где close_time заполнен, но status ошибочно OPEN.
+        # Не трогаем смены с close_time IS NULL — они могут быть CLOSED через close_stale_open_shifts.
         conn.execute(
             """
             UPDATE shifts
-            SET status = CASE WHEN close_time IS NULL THEN 'OPEN' ELSE 'CLOSED' END
+            SET status = 'CLOSED'
+            WHERE close_time IS NOT NULL AND status != 'CLOSED'
             """
         )
         conn.commit()
@@ -350,6 +353,30 @@ def ensure_last_mid_at_column(
         raise
 
 
+def ensure_mid_started_at_column(
+    conn: sqlite3.Connection,
+) -> None:
+    """Добавляет колонку mid_started_at в таблицу shifts.
+
+    Args:
+        conn: Подключение SQLite.
+
+    Returns:
+        None.
+    """
+    if not _table_exists(conn, "shifts"):
+        return
+    try:
+        columns = _table_columns(conn, "shifts")
+        if "mid_started_at" not in columns:
+            conn.execute("ALTER TABLE shifts ADD COLUMN mid_started_at TEXT")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration ensure_mid_started_at_column failed")
+        raise
+
+
 def ensure_open_checklist_media_table(
     conn: sqlite3.Connection,
 ) -> None:
@@ -544,6 +571,7 @@ def ensure_employee_schedule_entries_table(
 
 def close_stale_open_shifts(
     conn: sqlite3.Connection,
+    today: str | None = None,
 ) -> None:
     """Закрывает OPEN-смены, дата которых раньше сегодняшней.
 
@@ -552,6 +580,8 @@ def close_stale_open_shifts(
 
     Args:
         conn: Подключение SQLite.
+        today: Дата в формате YYYY-MM-DD в таймзоне приложения.
+               Если не передана — используется UTC-дата SQLite.
 
     Returns:
         None.
@@ -559,15 +589,27 @@ def close_stale_open_shifts(
     if not _table_exists(conn, "shifts"):
         return
     try:
-        conn.execute(
-            """
-            UPDATE shifts
-            SET status = 'CLOSED'
-            WHERE status = 'OPEN'
-              AND close_time IS NULL
-              AND date < date('now', 'localtime')
-            """
-        )
+        if today:
+            conn.execute(
+                """
+                UPDATE shifts
+                SET status = 'CLOSED'
+                WHERE status = 'OPEN'
+                  AND close_time IS NULL
+                  AND date < ?
+                """,
+                (today,),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE shifts
+                SET status = 'CLOSED'
+                WHERE status = 'OPEN'
+                  AND close_time IS NULL
+                  AND date < date('now', 'localtime')
+                """
+            )
         conn.commit()
     except Exception:
         conn.rollback()

@@ -14,10 +14,14 @@ from app.db_schema import (
     close_stale_open_shifts as close_stale_open_shifts_schema,
     ensure_camera_tables as ensure_camera_tables_schema,
     ensure_close_residual_columns as ensure_close_residual_schema_columns,
+    ensure_employee_profiles_table as ensure_employee_profiles_schema_table,
+    ensure_employee_schedule_entries_table as ensure_employee_schedule_entries_schema_table,
     ensure_last_mid_at_column as ensure_last_mid_at_schema_column,
+    ensure_mid_started_at_column as ensure_mid_started_at_schema_column,
     ensure_mid_checklist_data_table as ensure_mid_checklist_data_schema_table,
     ensure_open_checklist_media_table as ensure_open_checklist_media_schema_table,
     ensure_shift_audit_columns as ensure_shift_audit_schema_columns,
+    ensure_shift_periodic_residuals_table as ensure_shift_periodic_residuals_schema_table,
     ensure_shift_status_column as ensure_shift_status_schema_column,
     ensure_shift_status_index as ensure_shift_status_schema_index,
 )
@@ -35,7 +39,7 @@ class Database:
         """
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=15.0)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
 
@@ -143,22 +147,27 @@ class Database:
         with self._lock:
             ensure_shift_status_schema_index(self._conn)
 
-    def _close_stale_open_shifts(self) -> None:
+    def _close_stale_open_shifts(self, today: str | None = None) -> None:
         """Закрывает брошенные OPEN-смены с прошедшей датой.
 
         Args:
-            Нет параметров.
+            today: Сегодняшняя дата в формате YYYY-MM-DD в timezone приложения.
 
         Returns:
             None.
         """
         with self._lock:
-            close_stale_open_shifts_schema(self._conn)
+            close_stale_open_shifts_schema(self._conn, today=today)
 
     def _ensure_last_mid_at_column(self) -> None:
         """Добавляет колонку last_mid_at в таблицу shifts."""
         with self._lock:
             ensure_last_mid_at_schema_column(self._conn)
+
+    def _ensure_mid_started_at_column(self) -> None:
+        """Добавляет колонку mid_started_at в таблицу shifts."""
+        with self._lock:
+            ensure_mid_started_at_schema_column(self._conn)
 
     def _ensure_open_checklist_media_table(self) -> None:
         """Создаёт таблицу open_checklist_media."""
@@ -175,11 +184,28 @@ class Database:
         with self._lock:
             ensure_camera_tables_schema(self._conn)
 
-    async def init(self) -> None:
+    def _ensure_employee_profiles_table(self) -> None:
+        """Создаёт таблицу employee_profiles."""
+        with self._lock:
+            ensure_employee_profiles_schema_table(self._conn)
+
+    def _ensure_employee_schedule_entries_table(self) -> None:
+        """Создаёт таблицу employee_schedule_entries."""
+        with self._lock:
+            ensure_employee_schedule_entries_schema_table(self._conn)
+
+    def _ensure_shift_periodic_residuals_table(self) -> None:
+        """Создаёт таблицу shift_periodic_residuals."""
+        with self._lock:
+            ensure_shift_periodic_residuals_schema_table(self._conn)
+
+    async def init(self, today: str | None = None) -> None:
         """Инициализирует схему базы данных и миграции.
 
         Args:
-            Нет параметров.
+            today: Сегодняшняя дата (YYYY-MM-DD) в timezone приложения для
+                   корректного закрытия брошенных смен. Если None, используется
+                   системный localtime SQLite.
 
         Returns:
             None.
@@ -282,11 +308,15 @@ class Database:
         await asyncio.to_thread(self._ensure_shift_audit_columns)
         await asyncio.to_thread(self._ensure_close_residual_columns)
         await asyncio.to_thread(self._ensure_shift_status_index)
-        await asyncio.to_thread(self._close_stale_open_shifts)
+        await asyncio.to_thread(self._close_stale_open_shifts, today)
         await asyncio.to_thread(self._ensure_last_mid_at_column)
+        await asyncio.to_thread(self._ensure_mid_started_at_column)
         await asyncio.to_thread(self._ensure_open_checklist_media_table)
         await asyncio.to_thread(self._ensure_mid_checklist_data_table)
         await asyncio.to_thread(self._ensure_camera_tables)
+        await asyncio.to_thread(self._ensure_employee_profiles_table)
+        await asyncio.to_thread(self._ensure_employee_schedule_entries_table)
+        await asyncio.to_thread(self._ensure_shift_periodic_residuals_table)
 
     async def create_shift(
         self,
@@ -332,11 +362,8 @@ class Database:
             ),
         )
 
-    async def get_active_shift(self, employee_id: int) -> dict[str, Any] | None:
-        """Возвращает активную смену сотрудника.
-
-        Args:
-            employee_id: Telegram ID сотрудника.
+    async def get_active_shift(self) -> dict[str, Any] | None:
+        """Возвращает единственную открытую смену на сегодня (общая для всех сотрудников).
 
         Returns:
             Данные активной смены или None.
@@ -344,11 +371,11 @@ class Database:
         query = """
         SELECT *
         FROM shifts
-        WHERE employee_id = ? AND (status = 'OPEN' OR close_time IS NULL)
+        WHERE status = 'OPEN'
         ORDER BY id DESC
         LIMIT 1
         """
-        return await asyncio.to_thread(self._fetchone, query, (employee_id,))
+        return await asyncio.to_thread(self._fetchone, query, ())
 
     async def get_active_shifts(
         self,
@@ -367,14 +394,14 @@ class Database:
             query = """
             SELECT *
             FROM shifts
-            WHERE (status = 'OPEN' OR close_time IS NULL) AND date = ?
+            WHERE status = 'OPEN' AND date = ?
             ORDER BY id ASC
             """
             return await asyncio.to_thread(self._fetchall, query, (shift_date,))
         query = """
         SELECT *
         FROM shifts
-        WHERE status = 'OPEN' OR close_time IS NULL
+        WHERE status = 'OPEN'
         ORDER BY id ASC
         """
         return await asyncio.to_thread(self._fetchall, query)
@@ -467,6 +494,19 @@ class Database:
             query,
             (shift_id, checklist_type, json.dumps(unique_completed), active_section),
         )
+
+    async def delete_checklist_state(self, shift_id: int, checklist_type: str) -> None:
+        """Удаляет сохранённое состояние чек-листа после его завершения.
+
+        Args:
+            shift_id: Идентификатор смены.
+            checklist_type: Тип чек-листа.
+
+        Returns:
+            None.
+        """
+        query = "DELETE FROM checklist_state WHERE shift_id = ? AND checklist_type = ?"
+        await asyncio.to_thread(self._execute, query, (shift_id, checklist_type))
 
     async def upsert_close_residual(
         self,
@@ -662,6 +702,19 @@ class Database:
             ),
         )
 
+    async def update_shift_mid_started_at(self, shift_id: int, timestamp: str) -> None:
+        """Фиксирует момент запуска чек-листа ведения смены.
+
+        Args:
+            shift_id: Идентификатор смены.
+            timestamp: ISO-время старта mid-чек-листа.
+
+        Returns:
+            None.
+        """
+        query = "UPDATE shifts SET mid_started_at = ? WHERE id = ?"
+        await asyncio.to_thread(self._execute, query, (timestamp, shift_id))
+
     async def update_shift_last_mid(self, shift_id: int, timestamp: str) -> None:
         """Обновляет время последнего завершённого чек-листа ведения смены.
 
@@ -673,6 +726,19 @@ class Database:
             None.
         """
         query = "UPDATE shifts SET last_mid_at = ? WHERE id = ?"
+        await asyncio.to_thread(self._execute, query, (timestamp, shift_id))
+
+    async def update_shift_opened_at(self, shift_id: int, timestamp: str) -> None:
+        """Обновляет время завершения чек-листа открытия смены.
+
+        Args:
+            shift_id: Идентификатор смены.
+            timestamp: ISO-время завершения open-чек-листа.
+
+        Returns:
+            None.
+        """
+        query = "UPDATE shifts SET opened_at = ? WHERE id = ?"
         await asyncio.to_thread(self._execute, query, (timestamp, shift_id))
 
     async def upsert_open_checklist_media(
@@ -976,10 +1042,29 @@ class Database:
         query = """
         SELECT DISTINCT employee_id
         FROM shifts
-        WHERE status = 'OPEN' OR close_time IS NULL
+        WHERE status = 'OPEN'
         """
         rows = await asyncio.to_thread(self._fetchall, query)
         return [int(row["employee_id"]) for row in rows]
+
+    async def get_employee_display_name(self, telegram_id: int) -> str | None:
+        """Возвращает display_name сотрудника из employee_profiles или None.
+
+        Args:
+            telegram_id: Telegram ID сотрудника.
+
+        Returns:
+            display_name или None если не задан.
+        """
+        row = await asyncio.to_thread(
+            self._fetchone,
+            "SELECT display_name FROM employee_profiles WHERE telegram_id = ?",
+            (telegram_id,),
+        )
+        if not row:
+            return None
+        name = str(row.get("display_name") or "").strip()
+        return name or None
 
     async def has_shift_opened_on(
         self,
@@ -1016,7 +1101,7 @@ class Database:
                 shift_id=shift_id,
                 checklist_type="open",
             )
-            done_items = len(open_state["completed"]) if open_state else 0
+            done_items = len(open_state.get("completed", [])) if open_state else 0
             if done_items >= open_checklist_total:
                 return True
         return False

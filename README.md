@@ -124,6 +124,12 @@ SHIFT_OPEN_TIME=11:00
 SHIFT_CLOSE_TIME=22:00
 ```
 
+Опционально для работы через прокси:
+
+```env
+BOT_PROXY_URL=http://user:password@host:port
+```
+
 ## 3. Структура проекта
 
 ```text

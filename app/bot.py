@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
-from app.config import load_settings
+from app.config import Settings, load_settings
 from app.db import Database
 from app.handlers import router
 from app.logging_setup import configure_logging
@@ -16,6 +19,15 @@ from app.reminders import setup_scheduler
 
 
 logger = logging.getLogger(__name__)
+
+
+def _create_bot(settings: Settings) -> Bot:
+    """Создаёт Bot с прокси-сессией, если прокси задан в настройках."""
+    if settings.bot_proxy_url:
+        logger.info("Telegram bot will use proxy from BOT_PROXY_URL")
+        session = AiohttpSession(proxy=settings.bot_proxy_url)
+        return Bot(token=settings.bot_token, session=session)
+    return Bot(token=settings.bot_token)
 
 
 async def set_commands(bot: Bot) -> None:
@@ -51,9 +63,10 @@ async def main() -> None:
     settings = load_settings()
     configure_logging(settings.log_dir, settings.timezone)
     db = Database(settings.db_path)
-    await db.init()
+    today = datetime.now(ZoneInfo(settings.timezone)).date().isoformat()
+    await db.init(today=today)
 
-    bot = Bot(token=settings.bot_token)
+    bot = _create_bot(settings)
     dispatcher = Dispatcher(storage=MemoryStorage())
     dispatcher.include_router(router)
 

@@ -33,15 +33,15 @@ def fetch_all_employees_with_profiles(
         """
         SELECT
             s.employee_id AS telegram_id,
-            s.employee AS raw_name,
+            MAX(s.employee) AS raw_name,
             COUNT(*) AS shifts_count,
             COALESCE(ep.display_name, '') AS display_name,
             COALESCE(ep.is_active, 1) AS is_active
         FROM shifts s
         LEFT JOIN employee_profiles ep ON ep.telegram_id = s.employee_id
         WHERE s.employee_id IS NOT NULL
-        GROUP BY s.employee_id, s.employee
-        ORDER BY shifts_count DESC, s.employee ASC
+        GROUP BY s.employee_id
+        ORDER BY shifts_count DESC, raw_name ASC
         """
     ).fetchall()
 

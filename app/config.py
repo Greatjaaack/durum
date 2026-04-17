@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, time
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
@@ -36,6 +37,7 @@ class Settings:
     timezone: str
     shift_open_time: time
     shift_close_time: time
+    bot_proxy_url: str | None
 
 
 def _parse_time_hhmm(raw: str, *, var_name: str, default: str) -> time:
@@ -92,6 +94,11 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
     db_path = Path(os.getenv("DB_PATH", DEFAULT_DB_PATH)).expanduser()
     log_dir = Path(os.getenv("LOG_DIR", DEFAULT_LOG_DIR)).expanduser()
     timezone = os.getenv("BOT_TIMEZONE", DEFAULT_TIMEZONE)
+    try:
+        ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, KeyError):
+        raise RuntimeError(f"BOT_TIMEZONE '{timezone}' is not a valid timezone") from None
+    bot_proxy_url = os.getenv("BOT_PROXY_URL", "").strip() or None
     shift_open_time = _parse_time_hhmm(
         os.getenv("SHIFT_OPEN_TIME", DEFAULT_SHIFT_OPEN_TIME),
         var_name="SHIFT_OPEN_TIME",
@@ -112,4 +119,5 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
         timezone=timezone,
         shift_open_time=shift_open_time,
         shift_close_time=shift_close_time,
+        bot_proxy_url=bot_proxy_url,
     )

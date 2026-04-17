@@ -83,9 +83,9 @@
         <tbody>
           {% if residuals %}
           {% for row in residuals %}
-          <tr>
+          <tr{% if row.is_anomaly %} class="row-shift-anomaly"{% endif %}>
             <td>{{ row.item_label }}</td>
-            <td>{{ row.current_label }} {{ row.unit }}</td>
+            <td{% if row.is_anomaly %} class="anomaly-cell"{% endif %}>{{ row.current_label }} {{ row.unit }}</td>
           </tr>
           {% endfor %}
           {% else %}
@@ -155,33 +155,65 @@
     <table class="shifts-table">
       <thead>
         <tr>
-          <th class="col-id">ID</th>
-          <th>Дата</th>
-          <th>Сотрудник</th>
-          <th>Откр. начало</th>
-          <th>Откр. конец</th>
-          <th>Откр. длит.</th>
-          <th>Закр. начало</th>
-          <th>Закр. конец</th>
-          <th>Закр. длит.</th>
-          <th>Итого смена</th>
-          <th>Фото</th>
+          <th rowspan="2" class="th-vspan">Дата</th>
+          <th rowspan="2" class="th-vspan">Сотрудник</th>
+          <th colspan="3" class="th-group th-group--open">Открытие</th>
+          <th colspan="3" class="th-group th-group--mid">Ведение</th>
+          <th colspan="3" class="th-group th-group--close">Закрытие</th>
+          <th rowspan="2" class="th-vspan">Итого</th>
+          <th rowspan="2" class="th-vspan">Фото хол.</th>
+          <th rowspan="2" class="th-vspan">Фото закр.</th>
+        </tr>
+        <tr>
+          <th class="th-sub th-sub--open">Нач.</th>
+          <th class="th-sub th-sub--open">Кон.</th>
+          <th class="th-sub th-sub--open">Длит.</th>
+          <th class="th-sub th-sub--mid">Нач.</th>
+          <th class="th-sub th-sub--mid">Кон.</th>
+          <th class="th-sub th-sub--mid">Длит.</th>
+          <th class="th-sub th-sub--close">Нач.</th>
+          <th class="th-sub th-sub--close">Кон.</th>
+          <th class="th-sub th-sub--close">Длит.</th>
         </tr>
       </thead>
       <tbody>
         {% if shifts %}
         {% for row in shifts %}
         <tr class="{{ row.row_class }}">
-          <td class="cell-id">#{{ row.id }}</td>
           <td class="cell-date">{{ row.date_label }}</td>
           <td class="cell-employee">{{ row.employee }}</td>
           <td class="cell-time">{{ row.open_started_at }}</td>
           <td class="cell-time">{{ row.opened_at }}</td>
           <td class="cell-duration">{{ row.opening_duration_label }}</td>
+          <td class="cell-time">{{ row.mid_started_at }}</td>
+          <td class="cell-time">{{ row.last_mid_at }}</td>
+          <td class="cell-duration">{{ row.mid_duration_label }}</td>
           <td class="cell-time">{{ row.close_started_at_label }}</td>
           <td class="cell-time">{{ row.closed_at }}</td>
           <td class="cell-duration">{{ row.close_duration_label }}</td>
           <td class="cell-duration">{{ row.work_duration_label }}</td>
+          <td class="media-cell">
+            {% if row.open_media_items %}
+            <div class="media-list">
+              {% for media in row.open_media_items %}
+              <a
+                class="media-thumb js-lightbox"
+                href="/dashboard/open-media/{{ media.media_id }}"
+                data-label="{{ media.item_label }}"
+                title="{{ media.item_label }}"
+              >
+                <img
+                  src="/dashboard/open-media/{{ media.media_id }}"
+                  alt="{{ media.item_short }}"
+                  loading="lazy"
+                />
+              </a>
+              {% endfor %}
+            </div>
+            {% else %}
+            <span class="muted">—</span>
+            {% endif %}
+          </td>
           <td class="media-cell">
             {% if row.close_media_items %}
             <div class="media-list">
@@ -208,7 +240,7 @@
         {% endfor %}
         {% else %}
         <tr>
-          <td colspan="11">Нет данных за выбранный период</td>
+          <td colspan="14">Нет данных за выбранный период</td>
         </tr>
         {% endif %}
       </tbody>

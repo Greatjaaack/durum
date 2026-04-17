@@ -44,29 +44,16 @@ async def _run_camera_sync(db_path: Path) -> None:
     except Exception:
         logger.exception("camera_sync: ошибка запуска процесса")
 
-# Текст напоминания о проверке хозов и чистоты.
-SUPPLIES_AND_CLEANLINESS_REMINDER_TEXT = (
-    "Проверьте все хозы: каждую упаковку, а также чистоту в зале и на кухне."
-)
-
 # Текст напоминания о необходимости заказа продукции.
 PRODUCT_ORDER_REMINDER_TEXT = "Проверьте необходимость заказа продукции."
 
 # Сообщение о незавершённом чек-листе закрытия смены.
 INCOMPLETE_CLOSE_CHECKLIST_TEXT = "⚠️ Смена ещё не закрыта\n\nЧек-лист закрытия смены не завершён."
 
-# Шаг часов для периодического напоминания о хозах и чистоте.
-SUPPLIES_AND_CLEANLINESS_REMINDER_HOUR_STEP = "*/2"
+# Шаг часов для объединённого периодического напоминания.
+PERIODIC_REMINDER_HOUR_STEP = "*/2"
 
-# Текст напоминания о прохождении чек-листа ведения смены.
-MID_CHECKLIST_REMINDER_TEXT = (
-    "⏰ Напоминание: пройдите чек-лист ведения смены (/mid)"
-)
-
-# Шаг часов для напоминания о чек-листе ведения смены.
-MID_CHECKLIST_REMINDER_HOUR_STEP = "*/2"
-
-# Минимальный интервал (в часах) между прохождениями mid для напоминания.
+# Минимальный интервал (в часах) между прохождениями mid для включения пункта в напоминание.
 MID_CHECKLIST_REMINDER_INTERVAL_HOURS = 2
 
 # Час ежедневной проверки заказа продукции.
@@ -83,14 +70,6 @@ CLOSE_CHECKLIST_FIRST_REMINDER_OFFSET_MIN = 90
 
 # Смещение (в минутах) для второго напоминания после времени закрытия смены.
 CLOSE_CHECKLIST_SECOND_REMINDER_OFFSET_MIN = 105
-
-# Текст напоминания о записи периодических остатков.
-PERIODIC_RESIDUALS_REMINDER_TEXT = (
-    "⏰ Время записать остатки! Нажмите «📋 Остатки смены» или /residuals"
-)
-
-# Шаг часов для напоминания о периодических остатках.
-PERIODIC_RESIDUALS_HOUR_STEP = "*/2"
 
 
 def _time_with_offset(
@@ -187,18 +166,6 @@ def setup_scheduler(
             except Exception:
                 logger.exception("Failed to send reminder to employee %s", employee_id)
 
-    async def remind_supplies_and_cleanliness() -> None:
-        """Напоминает проверить хозы и чистоту.
-
-        Args:
-            Нет параметров.
-
-        Returns:
-            None.
-        """
-        logger.debug("Scheduler job: supplies_and_cleanliness_reminder")
-        await _send_to_active_employees(SUPPLIES_AND_CLEANLINESS_REMINDER_TEXT)
-
     async def remind_product_order() -> None:
         """Напоминает проверить необходимость заказа продукции.
 
@@ -285,8 +252,12 @@ def setup_scheduler(
         except Exception:
             logger.exception("Failed to send close checklist reminder to work chat")
 
-    async def remind_mid_checklist() -> None:
-        """Напоминает пройти чек-лист ведения смены, если он не пройден более 2 часов.
+    async def remind_periodic() -> None:
+        """Объединённое периодическое напоминание каждые 2 часа в рабочее время.
+
+        Отправляет одно сообщение с тремя пунктами: хозы/чистота, ведение смены,
+        остатки. Пункт /mid включается только если он не пройден за последние 2 часа.
+        Отправка происходит только в рабочие часы (между SHIFT_OPEN_TIME и SHIFT_CLOSE_TIME).
 
         Args:
             Нет параметров.
@@ -294,13 +265,19 @@ def setup_scheduler(
         Returns:
             None.
         """
-        logger.debug("Scheduler job: mid_checklist_reminder")
-        active_shifts = await _get_active_shifts_for_current_date()
-        if not active_shifts:
-            logger.debug("Mid checklist reminder: no active shifts today")
+        logger.debug("Scheduler job: periodic_reminder")
+
+        now_t = datetime.now(timezone).time()
+        if not (settings.shift_open_time <= now_t <= settings.shift_close_time):
+            logger.debug("Periodic reminder skipped — outside working hours")
             return
 
-        now = datetime.now(_utc_tz.utc)
+        active_shifts = await _get_active_shifts_for_current_date()
+        if not active_shifts:
+            logger.debug("Periodic reminder: no active shifts today")
+            return
+
+        now_utc = datetime.now(_utc_tz.utc)
         for shift in active_shifts:
             employee_id_raw = shift.get("employee_id")
             try:
@@ -308,40 +285,38 @@ def setup_scheduler(
             except (TypeError, ValueError):
                 continue
 
+            include_mid = True
             last_mid_raw = shift.get("last_mid_at")
             if last_mid_raw:
                 try:
                     last_mid = datetime.fromisoformat(str(last_mid_raw))
                     if last_mid.tzinfo is None:
                         last_mid = last_mid.replace(tzinfo=_utc_tz.utc)
-                    if now - last_mid < timedelta(hours=MID_CHECKLIST_REMINDER_INTERVAL_HOURS):
+                    if now_utc - last_mid < timedelta(hours=MID_CHECKLIST_REMINDER_INTERVAL_HOURS):
+                        include_mid = False
                         logger.debug(
-                            "Mid checklist reminder skipped for employee %s: "
-                            "completed recently",
+                            "Periodic reminder: mid skipped for employee %s (completed recently)",
                             employee_id,
                         )
-                        continue
                 except ValueError:
                     pass
 
+            bullets = ["• Проверьте хозы и чистоту"]
+            if include_mid:
+                bullets.append("• Пройдите ведение смены /mid")
+            bullets.append("• Запишите остатки /residuals")
+            text = "⏰ Напоминание:\n" + "\n".join(bullets)
+
             try:
-                await bot.send_message(employee_id, MID_CHECKLIST_REMINDER_TEXT)
-                logger.info("Mid checklist reminder sent to employee %s", employee_id)
+                await bot.send_message(employee_id, text)
+                logger.info(
+                    "Periodic reminder sent to employee %s (mid=%s)", employee_id, include_mid
+                )
             except Exception:
                 logger.exception(
-                    "Failed to send mid checklist reminder to employee %s", employee_id
+                    "Failed to send periodic reminder to employee %s", employee_id
                 )
 
-    scheduler.add_job(
-        remind_supplies_and_cleanliness,
-        trigger=CronTrigger(
-            minute=0,
-            hour=SUPPLIES_AND_CLEANLINESS_REMINDER_HOUR_STEP,
-            timezone=timezone,
-        ),
-        id="supplies_and_cleanliness_reminder",
-        replace_existing=True,
-    )
     scheduler.add_job(
         remind_product_order,
         trigger=CronTrigger(
@@ -383,43 +358,21 @@ def setup_scheduler(
         replace_existing=True,
     )
     scheduler.add_job(
-        remind_mid_checklist,
+        remind_periodic,
         trigger=CronTrigger(
             minute=0,
-            hour=MID_CHECKLIST_REMINDER_HOUR_STEP,
+            hour=PERIODIC_REMINDER_HOUR_STEP,
             timezone=timezone,
         ),
-        id="mid_checklist_reminder",
+        id="periodic_reminder",
         replace_existing=True,
     )
-
-    async def remind_periodic_residuals() -> None:
-        """Напоминает записать периодические остатки каждые 2 часа.
-
-        Args:
-            Нет параметров.
-
-        Returns:
-            None.
-        """
-        logger.debug("Scheduler job: periodic_residuals_reminder")
-        await _send_to_active_employees(PERIODIC_RESIDUALS_REMINDER_TEXT)
-
-    scheduler.add_job(
-        remind_periodic_residuals,
-        trigger=CronTrigger(
-            minute=0,
-            hour=PERIODIC_RESIDUALS_HOUR_STEP,
-            timezone=timezone,
-        ),
-        id="periodic_residuals_reminder",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _run_camera_sync,
-        trigger=CronTrigger(minute=0, timezone=timezone),
-        args=[settings.db_path],
-        id="camera_sync",
-        replace_existing=True,
-    )
+    # camera_sync отключён
+    # scheduler.add_job(
+    #     _run_camera_sync,
+    #     trigger=CronTrigger(minute=0, timezone=timezone),
+    #     args=[settings.db_path],
+    #     id="camera_sync",
+    #     replace_existing=True,
+    # )
     return scheduler

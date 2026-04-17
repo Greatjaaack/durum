@@ -80,6 +80,7 @@ body {
 .layout {
   padding: 0 20px 24px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -89,6 +90,7 @@ body {
   border-radius: 14px;
   padding: 14px;
   box-shadow: 0 6px 16px rgba(8, 15, 32, 0.06);
+  min-width: 0;
 }
 
 .empty-state p {
@@ -378,6 +380,52 @@ tr.row-shift-anomaly td:first-child {
 .shifts-table .checklist-status {
   white-space: normal;
   min-width: 160px;
+}
+
+/* Two-row grouped header */
+.shifts-table .th-group {
+  text-align: center;
+  font-weight: 700;
+  border-bottom: none;
+}
+
+.shifts-table .th-group--open  { background: var(--good);    color: var(--good-text); }
+.shifts-table .th-group--mid   { background: var(--caution); color: var(--caution-text); }
+.shifts-table .th-group--close { background: var(--warn);    color: var(--danger-text); }
+
+.shifts-table .th-sub {
+  text-align: center;
+  font-size: 11px;
+}
+
+.shifts-table .th-sub--open  { background: #f0fdf4; }
+.shifts-table .th-sub--mid   { background: #fffbeb; }
+.shifts-table .th-sub--close { background: #fff5f5; }
+
+.shifts-table .th-vspan {
+  vertical-align: middle;
+}
+
+.shifts-table .cell-time,
+.shifts-table .cell-duration {
+  text-align: center;
+}
+
+/* Sticky overrides for two-row header */
+.table-wrap--scrollable .shifts-table thead tr:first-child th {
+  top: 0;
+  z-index: 2;
+  box-shadow: none;
+}
+
+.table-wrap--scrollable .shifts-table thead tr:first-child th.th-vspan {
+  box-shadow: 0 1px 0 var(--line);
+}
+
+.table-wrap--scrollable .shifts-table thead tr:nth-child(2) th {
+  top: 32px;
+  z-index: 1;
+  box-shadow: 0 1px 0 var(--line);
 }
 
 .media-cell {

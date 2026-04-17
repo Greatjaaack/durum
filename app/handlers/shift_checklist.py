@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
@@ -15,9 +15,10 @@ from app.checklist.ui import (
     checklist_total_items,
     normalize_checklist_section,
 )
+from app.config import Settings
 from app.db import Database
 from app.handlers.states import MidShiftStates, OpenShiftStates
-from app.handlers.utils import build_shift_menu_keyboard, safe_answer_callback, safe_edit_text
+from app.handlers.utils import build_shift_menu_keyboard, notify_work_chat, now_local, safe_answer_callback, safe_edit_text
 
 
 shift_checklist_router = Router()
@@ -85,6 +86,8 @@ async def checklist_callback(
     callback: CallbackQuery,
     state: FSMContext,
     db: Database,
+    bot: Bot,
+    settings: Settings,
 ) -> None:
     """Обрабатывает нажатия inline-кнопок в чек-листах смены.
 
@@ -269,25 +272,45 @@ async def checklist_callback(
     )
     if len(completed) == checklist_len:
         if checklist_type == "mid":
-            await safe_edit_text(
-                callback.message,
-                checklist_text,
-                reply_markup=build_checklist_keyboard(
-                    checklist_type,
-                    completed,
-                    active_section,
-                    shift_id=shift_id,
-                ),
-                log_context="shift checklist",
-            )
-            await _answer("Чек-лист завершён.")
             if just_completed:
+                await safe_edit_text(
+                    callback.message,
+                    checklist_text,
+                    log_context="shift checklist",
+                )
+                await _answer("Чек-лист завершён.")
                 await db.update_shift_last_mid(
                     shift_id,
                     datetime.now(timezone.utc).isoformat(),
                 )
+                await db.delete_checklist_state(shift_id, "mid")
                 await state.clear()
-                await callback.message.answer("✅ Чек-лист ведения смены завершён.")
+                await callback.message.answer(
+                    "✅ Ведение смены завершено",
+                    reply_markup=build_shift_menu_keyboard(is_shift_open=True),
+                )
+                user = callback.from_user
+                display_name = await db.get_employee_display_name(user.id)
+                name = display_name or (f"@{user.username}" if user.username else user.full_name)
+                mid_time = now_local(settings).strftime("%H:%M")
+                await notify_work_chat(
+                    bot,
+                    settings,
+                    f"✅ Ведение смены завершено\nСотрудник: {name}\nВремя: {mid_time}",
+                )
+            else:
+                await safe_edit_text(
+                    callback.message,
+                    checklist_text,
+                    reply_markup=build_checklist_keyboard(
+                        checklist_type,
+                        completed,
+                        active_section,
+                        shift_id=shift_id,
+                    ),
+                    log_context="shift checklist",
+                )
+                await _answer("Чек-лист завершён.")
             return
 
         if checklist_type == "open":
@@ -297,10 +320,24 @@ async def checklist_callback(
                 log_context="shift checklist",
             )
             await _answer("Чек-лист завершён.")
+            if just_completed:
+                await db.update_shift_opened_at(
+                    shift_id,
+                    datetime.now(timezone.utc).isoformat(),
+                )
             await state.clear()
             await callback.message.answer(
                 "Смена открыта ✅",
                 reply_markup=build_shift_menu_keyboard(is_shift_open=True),
+            )
+            user = callback.from_user
+            display_name = await db.get_employee_display_name(user.id)
+            name = display_name or (f"@{user.username}" if user.username else user.full_name)
+            open_time = now_local(settings).strftime("%H:%M")
+            await notify_work_chat(
+                bot,
+                settings,
+                f"✅ Смена открыта\nСотрудник: {name}\nВремя: {open_time}",
             )
             return
 

@@ -693,23 +693,25 @@ async def open_shift(
     if not message.from_user:
         return
 
-    active_shift = await db.get_active_shift(message.from_user.id)
+    active_shift = await db.get_active_shift()
     if active_shift:
         shift_id = int(active_shift["id"])
         open_state = await db.get_checklist_state(
             shift_id=shift_id,
             checklist_type="open",
         )
-        open_done = len(open_state["completed"]) if open_state else 0
+        open_done = len(open_state.get("completed", [])) if open_state else 0
         open_total = checklist_total_items("open")
         if open_done < open_total:
             await state.clear()
-            await message.answer("У вас уже открыта смена. Продолжим чек-лист открытия.")
+            await message.answer("Смена уже открыта. Продолжим чек-лист открытия.")
             await _start_checklist(message, state, db, "open", shift_id)
             return
 
+        opener = str(active_shift.get("opened_by") or active_shift.get("employee") or "")
+        opener_label = f" сотрудником {opener}" if opener else ""
         await message.answer(
-            "У вас уже открыта смена.",
+            f"Смена на сегодня уже открыта{opener_label}.",
             reply_markup=build_shift_menu_keyboard(is_shift_open=True),
         )
         return
@@ -735,6 +737,8 @@ async def open_checklist_photo_input(
     message: Message,
     state: FSMContext,
     db: Database,
+    bot: Bot,
+    settings: Settings,
 ) -> None:
     """Принимает обязательное фото холодильника при открытии смены.
 
@@ -786,7 +790,7 @@ async def open_checklist_photo_input(
     created_at = (
         message.date.isoformat()
         if message.date is not None
-        else datetime.utcnow().replace(microsecond=0).isoformat()
+        else datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     )
 
     open_items = flat_checklist_items("open")
@@ -831,6 +835,14 @@ async def open_checklist_photo_input(
         await message.answer(
             "Смена открыта ✅",
             reply_markup=build_shift_menu_keyboard(is_shift_open=True),
+        )
+        display_name = await db.get_employee_display_name(message.from_user.id)
+        name = display_name or employee_name(message)
+        open_time = now_local(settings).strftime("%H:%M")
+        await notify_work_chat(
+            bot,
+            settings,
+            f"✅ Смена открыта\nСотрудник: {name}\nВремя: {open_time}",
         )
     else:
         await message.answer("✅ Фото сохранено. Продолжайте чек-лист.")
@@ -877,12 +889,13 @@ async def mid_checklist_numeric_input(
         await message.answer("Пожалуйста, введите число (например, 500).")
         return
 
+    if not math.isfinite(value) or value < 0:
+        await message.answer("Введите корректное неотрицательное число.")
+        return
+
     max_value = cfg.get("max_value")
     if max_value is not None and value > float(max_value):
         await message.answer(f"Слишком большое значение. Максимум: {int(max_value)}.")
-        return
-    if value < 0:
-        await message.answer("Значение не может быть отрицательным.")
         return
 
     only_integer = bool(cfg.get("only_integer", False))
@@ -895,7 +908,7 @@ async def mid_checklist_numeric_input(
     created_at = (
         message.date.isoformat()
         if message.date is not None
-        else datetime.utcnow().replace(microsecond=0).isoformat()
+        else datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     )
 
     await db.upsert_mid_checklist_data(
@@ -962,7 +975,7 @@ async def mid_shift(
     if not message.from_user:
         return
 
-    active_shift = await db.get_active_shift(message.from_user.id)
+    active_shift = await db.get_active_shift()
     if not active_shift:
         await message.answer(
             "Сначала откройте смену.",
@@ -970,8 +983,10 @@ async def mid_shift(
         )
         return
 
+    shift_id = int(active_shift["id"])
+    await db.update_shift_mid_started_at(shift_id, datetime.now(timezone.utc).isoformat())
     await state.clear()
-    await _start_checklist(message, state, db, "mid", int(active_shift["id"]))
+    await _start_checklist(message, state, db, "mid", shift_id)
 
 
 @shift_router.message(Command("close"))
@@ -996,7 +1011,7 @@ async def close_shift_start(
     if not message.from_user:
         return
 
-    active_shift = await db.get_active_shift(message.from_user.id)
+    active_shift = await db.get_active_shift()
     if not active_shift:
         await message.answer(
             "Нет открытой смены.",
@@ -1009,7 +1024,7 @@ async def close_shift_start(
         shift_id=shift_id,
         checklist_type="open",
     )
-    open_done = len(open_state["completed"]) if open_state else 0
+    open_done = len(open_state.get("completed", [])) if open_state else 0
     open_total = checklist_total_items("open")
     if open_done < open_total:
         remaining = max(0, open_total - open_done)
@@ -2264,7 +2279,7 @@ async def _close_wizard_finalize_inner(
     actor_id: int,
     employee: str,
     shift_id: int,
-    completed: list[int],
+    completed: set[int],
     active_section: int,
     selected_item_index: int | None,
     values: dict[str, object],
@@ -3287,7 +3302,7 @@ async def close_wizard_media_input(
         created_at = (
             message.date.isoformat()
             if message.date is not None
-            else datetime.utcnow().replace(microsecond=0).isoformat()
+            else datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         )
         await db.upsert_close_checklist_media(
             shift_id=shift_id,
@@ -3359,7 +3374,7 @@ async def shift_photos(
     if not message.from_user:
         return
 
-    active_shift = await db.get_active_shift(message.from_user.id)
+    active_shift = await db.get_active_shift()
     if not active_shift:
         await message.answer("Нет открытой смены.")
         return
@@ -3403,7 +3418,7 @@ async def periodic_residuals_start(
     if not message.from_user:
         return
 
-    active_shift = await db.get_active_shift(message.from_user.id)
+    active_shift = await db.get_active_shift()
     if not active_shift:
         await message.answer(
             "Нет открытой смены.",
@@ -3459,8 +3474,8 @@ async def periodic_residuals_collect(
         await message.answer("Введите число.")
         return
 
-    if value < 0:
-        await message.answer("Значение не может быть отрицательным.")
+    if not math.isfinite(value) or value < 0:
+        await message.answer("Введите корректное неотрицательное число.")
         return
 
     max_value = float(item_cfg.get("max_value", 1_000_000))

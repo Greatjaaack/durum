@@ -102,6 +102,7 @@ mid_checklist:
     items:
       - "Жаренная курица"
       - "Гастроёмкость маринованной курицы в наличии"
+      - "Контроль свежести сырового лаваша (срок не более 3 дней)"
       - "Гастроёмкость соуса в наличии"
       - "Помидоры нарезаны + запас в наличии"
       - "Маринованные огурцы нарезаны + запас в наличии"
@@ -141,21 +142,18 @@ mid_checklist:
 close_checklist:
   - title: "Остатки продуктов"
     items:
-      - "Маринованная курица"
-      - "Готовая курица"
       - "Сырая курица"
-      - "Лаваш"
-      - "Жареный лаваш"
-      - "Суп"
-      - "Соусы"
       - "Остатки всех продуктов проверены"
 
   - title: "Убрать продукты"
     items:
+      - "Маринованная курица"
       - "Готовая курица"
+      - "Лаваш"
+      - "Жареный лаваш"
+      - "Суп"
       - "Соус"
       - "Тубусы"
-      - "Суп"
       - "Остатки фри списать"
 
   - title: "Подготовка к следующей смене"
@@ -233,7 +231,7 @@ close_residual_inputs:
     unit: "г"
     stock_item: null
     unit_type: "weight_g"
-    max_value: 10_000
+    max_value: 20_000
     only_integer: true
     step: 1
   "Лаваш":
@@ -253,7 +251,7 @@ close_residual_inputs:
     unit: "шт"
     stock_item: null
     unit_type: "piece"
-    max_value: 100
+    max_value: 200
     only_integer: true
     step: 1
   "Супа":
@@ -263,37 +261,28 @@ close_residual_inputs:
     unit: "г"
     stock_item: null
     unit_type: "weight_g"
-    max_value: 20
+    max_value: 20_000
     only_integer: false
     step: 0.1
   "Соус":
     key: "sauce"
-    checklist_item: "Соусы"
+    checklist_item: "Соус"
     prompt: "Введите остаток соуса (л)"
-    unit: "л"
+    unit: "мл"
     stock_item: null
     unit_type: "liter"
     max_value: 20
     only_integer: false
     step: 0.1
-    quick_buttons:
-      - label: "0 л"
-        value: "0"
-      - label: "0.5 л"
-        value: "0.5"
-      - label: "1 л"
-        value: "1"
-      - label: "2 л"
-        value: "2"
 
   "Остатки фри":
     key: "fry_residual"
-    checklist_item: "Остатки фри списаны"
+    checklist_item: "Остатки фри списать"
     prompt: "Введите вес остатков фри (г)"
     unit: "г"
     stock_item: null
     unit_type: "weight_g"
-    max_value: 5000
+    max_value: 5_000
     only_integer: true
     step: 1
 
@@ -303,7 +292,7 @@ mid_numeric_inputs:
     prompt: "Введите количество готовой курицы (г)"
     unit: "г"
     unit_type: "weight_g"
-    max_value: 10000
+    max_value: 20_000
     only_integer: true
     step: 1
 
@@ -313,7 +302,7 @@ periodic_residual_inputs:
     prompt: "Остаток супа (г)"
     unit: "г"
     unit_type: "weight_g"
-    max_value: 30000
+    max_value: 20_000
     only_integer: true
     step: 1
   "Лаваши":
@@ -337,7 +326,7 @@ periodic_residual_inputs:
     prompt: "Остаток халвы (г)"
     unit: "г"
     unit_type: "weight_g"
-    max_value: 10000
+    max_value: 5_000
     only_integer: true
     step: 1
   "Маринованная курица":
@@ -345,7 +334,7 @@ periodic_residual_inputs:
     prompt: "Остаток маринованной курицы (г)"
     unit: "г"
     unit_type: "weight_g"
-    max_value: 20000
+    max_value: 20_000
     only_integer: true
     step: 1
   "Сырая курица":
@@ -353,7 +342,7 @@ periodic_residual_inputs:
     prompt: "Остаток сырой курицы (г)"
     unit: "г"
     unit_type: "weight_g"
-    max_value: 20000
+    max_value: 20_000
     only_integer: true
     step: 1
   "Огурцы":
@@ -361,7 +350,7 @@ periodic_residual_inputs:
     prompt: "Остаток огурцов (г)"
     unit: "г"
     unit_type: "weight_g"
-    max_value: 10000
+    max_value: 10_000
     only_integer: true
     step: 1
   "Помидоры":
@@ -369,7 +358,7 @@ periodic_residual_inputs:
     prompt: "Остаток помидоров (г)"
     unit: "г"
     unit_type: "weight_g"
-    max_value: 10000
+    max_value: 10_000
     only_integer: true
     step: 1
   "Майонез":
@@ -377,6 +366,6 @@ periodic_residual_inputs:
     prompt: "Остаток майонеза (г)"
     unit: "г"
     unit_type: "weight_g"
-    max_value: 10000
+    max_value: 10_000
     only_integer: true
     step: 1

@@ -28,20 +28,16 @@ logger = logging.getLogger(__name__)
 misc_router = Router()
 
 
-async def _is_shift_open_for_user(
-    db: Database,
-    telegram_id: int,
-) -> bool:
-    """Проверяет, открыта ли смена у сотрудника.
+async def _is_shift_open(db: Database) -> bool:
+    """Проверяет, открыта ли смена на сегодня (общая для всех сотрудников).
 
     Args:
         db: Экземпляр базы данных.
-        telegram_id: Telegram ID сотрудника.
 
     Returns:
-        True, если смена открыта.
+        True, если есть открытая смена.
     """
-    active_shift = await db.get_active_shift(telegram_id)
+    active_shift = await db.get_active_shift()
     return active_shift is not None
 
 
@@ -59,9 +55,7 @@ async def start_command(
     Returns:
         None.
     """
-    is_shift_open = False
-    if message.from_user:
-        is_shift_open = await _is_shift_open_for_user(db, message.from_user.id)
+    is_shift_open = await _is_shift_open(db)
     await message.answer(
         "Выберите действие:",
         reply_markup=build_shift_menu_keyboard(is_shift_open=is_shift_open),
@@ -86,9 +80,7 @@ async def cancel_state(
         None.
     """
     await state.clear()
-    is_shift_open = False
-    if message.from_user:
-        is_shift_open = await _is_shift_open_for_user(db, message.from_user.id)
+    is_shift_open = await _is_shift_open(db)
     await message.answer(
         "Действие отменено.",
         reply_markup=build_shift_menu_keyboard(is_shift_open=is_shift_open),
