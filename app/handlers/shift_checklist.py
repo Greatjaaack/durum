@@ -23,6 +23,34 @@ from app.handlers.utils import build_shift_menu_keyboard, notify_work_chat, now_
 
 shift_checklist_router = Router()
 
+OPEN_FORCE_PREFIX = "openforce"
+
+
+def _build_open_notification_text(name: str, open_time: str, completed: set[int]) -> str:
+    """Строит текст уведомления об открытии смены, перечисляя пропущенные блоки."""
+    from app.checklist.ui import checklist_total_items
+    total = checklist_total_items("open")
+    if len(completed) >= total:
+        return f"✅ Смена открыта\nСотрудник: {name}\nВремя: {open_time}"
+
+    cursor = 0
+    section_skips: list[tuple[str, int]] = []
+    for section in CHECKLISTS["open"]:
+        items = section["items"]
+        n_skipped = sum(1 for i in range(len(items)) if (cursor + i) not in completed)
+        if n_skipped:
+            section_skips.append((section["title"], n_skipped))
+        cursor += len(items)
+
+    total_skipped = total - len(completed)
+    lines = [
+        f"⚠️ Смена открыта с пропусками\nСотрудник: {name}\nВремя: {open_time}",
+        f"\nПропущено {total_skipped} пунктов:",
+    ]
+    for sec_title, n in section_skips:
+        lines.append(f"• {sec_title}: {n} пропущено")
+    return "\n".join(lines)
+
 
 def checklist_state_keys(
     checklist_type: str,
@@ -337,7 +365,7 @@ async def checklist_callback(
             await notify_work_chat(
                 bot,
                 settings,
-                f"✅ Смена открыта\nСотрудник: {name}\nВремя: {open_time}",
+                _build_open_notification_text(name, open_time, completed),
             )
             return
 
@@ -361,3 +389,58 @@ async def checklist_callback(
         log_context="shift checklist",
     )
     await _answer()
+
+
+@shift_checklist_router.callback_query(F.data.startswith(f"{OPEN_FORCE_PREFIX}:"))
+async def open_force_callback(
+    callback: CallbackQuery,
+    state: FSMContext,
+    db: Database,
+    bot: Bot,
+    settings: Settings,
+) -> None:
+    """Принудительно открывает смену с пропущенными пунктами открытия."""
+    if not callback.data or not callback.message or not callback.from_user:
+        return
+
+    async def _answer(text: str | None = None, *, show_alert: bool = False) -> None:
+        await safe_answer_callback(callback, text, show_alert=show_alert, log_context="open force")
+
+    parts = callback.data.split(":")
+    if len(parts) != 2:
+        await _answer("Некорректный запрос", show_alert=True)
+        return
+    try:
+        shift_id = int(parts[1])
+    except ValueError:
+        await _answer("Некорректный ID смены", show_alert=True)
+        return
+
+    shift = await db.get_shift_by_id(shift_id)
+    if not shift or str(shift.get("status") or "").upper() != "OPEN":
+        await _answer("Смена уже закрыта или не найдена.", show_alert=True)
+        return
+    if shift.get("opened_at"):
+        await _answer("Смена уже открыта.", show_alert=True)
+        return
+
+    saved_state = await db.get_checklist_state(shift_id=shift_id, checklist_type="open")
+    state_data = await state.get_data()
+    keys = checklist_state_keys("open")
+    completed = restore_completed_indexes(state_data, keys["done_key"], saved_state)
+
+    await db.update_shift_opened_at(shift_id, datetime.now(timezone.utc).isoformat())
+
+    user = callback.from_user
+    display_name = await db.get_employee_display_name(user.id)
+    name = display_name or (f"@{user.username}" if user.username else user.full_name)
+    open_time = now_local(settings).strftime("%H:%M")
+
+    await notify_work_chat(bot, settings, _build_open_notification_text(name, open_time, completed))
+
+    await state.clear()
+    await callback.message.answer(
+        "Смена открыта ✅",
+        reply_markup=build_shift_menu_keyboard(is_shift_open=True),
+    )
+    await _answer("Смена открыта")

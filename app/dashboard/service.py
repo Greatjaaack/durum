@@ -750,6 +750,7 @@ def _build_shift_models(
     if name_map is None:
         name_map = {}
 
+    open_checklist_total = checklist_total_items("open")
     models: list[dict[str, object]] = []
     for row in shifts_rows:
         shift_id = int(row["id"])
@@ -791,6 +792,20 @@ def _build_shift_models(
             close_duration_minutes = int(round(float(row["close_duration_sec"]) / 60))
         else:
             close_duration_minutes = _duration_minutes(close_started_dt, closed_dt)
+
+        open_state: set[int] | None = checklist_state.get(shift_id, {}).get("open")
+        if open_state is None:
+            open_checklist_label = "—"
+            open_checklist_class = "badge--neutral"
+        else:
+            open_done = len(open_state)
+            open_skipped = open_checklist_total - open_done
+            if open_skipped <= 0:
+                open_checklist_label = "✔ все"
+                open_checklist_class = "badge--ok"
+            else:
+                open_checklist_label = f"⚠ {open_skipped} пропущено"
+                open_checklist_class = "badge--warn"
 
         close_state = checklist_state.get(shift_id, {}).get("close", set())
         close_status_labels, close_done, close_total = _close_checklist_status_labels(close_state)
@@ -834,6 +849,8 @@ def _build_shift_models(
                 "opened_at": _fmt_time(opened_raw),
                 "opening_duration_minutes": opening_duration_minutes,
                 "opening_duration_label": format_duration(opening_duration_minutes),
+                "open_checklist_label": open_checklist_label,
+                "open_checklist_class": open_checklist_class,
                 # Ведение
                 "mid_started_at": _fmt_time(mid_started_raw),
                 "last_mid_at": _fmt_time(last_mid_raw),
@@ -1122,6 +1139,8 @@ def _build_gantt_chart_data(
         opened_dt = _parse_iso_datetime(str(shift.get("opened_at_raw") or ""))
         close_started_dt = _parse_iso_datetime(str(shift.get("close_started_raw") or ""))
         closed_dt = _parse_iso_datetime(str(shift.get("closed_at_raw") or ""))
+        is_open_shift = str(shift.get("status") or "").upper() == "OPEN"
+        now_dt = datetime.now(_utc_tz.utc) if is_open_shift else None
 
         def block(start: datetime | None, end: datetime | None) -> list[int] | None:
             s = _clamp(_minutes_from_midnight(start), GANTT_MIN, GANTT_MAX)
@@ -1130,14 +1149,18 @@ def _build_gantt_chart_data(
                 return None
             return [s, e]
 
+        operation_end = close_started_dt or now_dt
         labels.append(date_label)
         opening_blocks.append(block(open_started_dt, opened_dt))
-        operation_blocks.append(block(opened_dt, close_started_dt))
+        operation_blocks.append(block(opened_dt, operation_end))
         closing_blocks.append(block(close_started_dt, closed_dt))
+        op_tooltip = _fmt_tooltip_phase(opened_dt, operation_end)
+        if is_open_shift and operation_end is not None and close_started_dt is None:
+            op_tooltip = (op_tooltip + " (сейчас)") if op_tooltip else ""
         tooltips.append(
             {
                 "opening": _fmt_tooltip_phase(open_started_dt, opened_dt),
-                "operation": _fmt_tooltip_phase(opened_dt, close_started_dt),
+                "operation": op_tooltip,
                 "closing": _fmt_tooltip_phase(close_started_dt, closed_dt),
             }
         )

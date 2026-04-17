@@ -313,7 +313,6 @@ class Database:
         await asyncio.to_thread(self._ensure_mid_started_at_column)
         await asyncio.to_thread(self._ensure_open_checklist_media_table)
         await asyncio.to_thread(self._ensure_mid_checklist_data_table)
-        await asyncio.to_thread(self._ensure_camera_tables)
         await asyncio.to_thread(self._ensure_employee_profiles_table)
         await asyncio.to_thread(self._ensure_employee_schedule_entries_table)
         await asyncio.to_thread(self._ensure_shift_periodic_residuals_table)

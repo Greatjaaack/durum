@@ -11,13 +11,17 @@
 <body>
   <header class="topbar">
     <div class="topbar__row">
-      <div class="topbar__title">Durum Dashboard</div>
+      <div class="topbar__brand">
+        <img src="/static/logo.png" alt="Iskender" class="topbar__logo" onerror="this.style.display='none'" />
+        <div class="topbar__title">Iskender</div>
+      </div>
       {% if active_shift %}
       <div class="shift-active-badge">
         <span class="shift-active-dot"></span>
         Смена открыта — {{ active_shift.employee }}{% if active_shift.open_time %} с {{ active_shift.open_time }}{% endif %}
       </div>
       {% endif %}
+      <a href="/logout" class="logout-btn">Выйти</a>
     </div>
     {% if subtitle %}<div class="topbar__subtitle">{{ subtitle }}</div>{% endif %}
   </header>

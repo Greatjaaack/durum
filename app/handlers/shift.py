@@ -39,7 +39,7 @@ from app.handlers.constants import (
     MENU_RESIDUALS,
     MENU_SHIFT_PHOTOS,
 )
-from app.handlers.shift_checklist import checklist_state_keys, restore_completed_indexes
+from app.handlers.shift_checklist import _build_open_notification_text, checklist_state_keys, restore_completed_indexes
 from app.handlers.states import CloseShiftStates, MidShiftStates, OpenShiftStates, PeriodicResidualStates
 from app.handlers.utils import (
     build_shift_menu_keyboard,
@@ -842,7 +842,7 @@ async def open_checklist_photo_input(
         await notify_work_chat(
             bot,
             settings,
-            f"✅ Смена открыта\nСотрудник: {name}\nВремя: {open_time}",
+            _build_open_notification_text(name, open_time, completed),
         )
     else:
         await message.answer("✅ Фото сохранено. Продолжайте чек-лист.")
@@ -1352,13 +1352,21 @@ def _close_wizard_finish_warning_screen(
     total = close_wizard_total_items()
     done = len(completed)
     remaining = max(0, total - done)
-    missing_preview = _close_wizard_missing_items_preview(completed)
     text = (
-        "Вы не завершили все пункты\n\n"
-        f"Осталось: {remaining} {_close_wizard_count_suffix(remaining)}"
+        f"⚠️ Не все пункты выполнены\n\nВыполнено: {done} из {total}"
     )
-    if missing_preview:
-        text = f"{text}\n\n{missing_preview}"
+    missing_items = _close_wizard_missing_items(completed)
+    if missing_items:
+        by_section: dict[int, list[str]] = {}
+        for item in missing_items:
+            by_section.setdefault(item.section_index, []).append(item.text)
+        lines = ["\n\nПропущено:"]
+        for sec_idx, item_texts in sorted(by_section.items()):
+            sec_title = CLOSE_CHECKLIST[sec_idx]["title"] if sec_idx < len(CLOSE_CHECKLIST) else f"Блок {sec_idx + 1}"
+            lines.append(f"\n{sec_title}:")
+            for t in item_texts:
+                lines.append(f"• {t}")
+        text += "\n".join(lines)
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -1366,7 +1374,13 @@ def _close_wizard_finish_warning_screen(
                     text="К пропущенным пунктам",
                     callback_data=f"{CLOSE_WIZARD_CALLBACK_PREFIX}:finish_return",
                 ),
-            ]
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Закрыть всё равно",
+                    callback_data=f"{CLOSE_WIZARD_CALLBACK_PREFIX}:finish_force",
+                ),
+            ],
         ]
     )
     return text, keyboard
@@ -2112,6 +2126,7 @@ async def _close_wizard_finalize(
     actor_id: int | None = None,
     actor_username: str | None = None,
     actor_full_name: str | None = None,
+    force: bool = False,
 ) -> bool:
     """Финализирует закрытие смены из мастера.
 
@@ -2174,7 +2189,7 @@ async def _close_wizard_finalize(
         return False
 
     total = close_wizard_total_items()
-    if len(completed) < total:
+    if not force and len(completed) < total:
         first_missing = close_wizard_first_incomplete_index(completed)
         if first_missing < total:
             active_section = close_wizard_section_for_index(first_missing)
@@ -2416,6 +2431,21 @@ async def _close_wizard_finalize_inner(
         f"Суп — {fmt_number(soup_l)} л\n"
         f"Соус — {fmt_number(sauce_l)} л"
     )
+    if not all_items_completed:
+        missing_close = _close_wizard_missing_items(completed)
+        by_sec: dict[int, list[str]] = {}
+        for item in missing_close:
+            by_sec.setdefault(item.section_index, []).append(item.text)
+        skip_lines = ["\n\nПропущенные пункты чек-листа:"]
+        for sec_idx, item_texts in sorted(by_sec.items()):
+            sec_title = CLOSE_CHECKLIST[sec_idx]["title"] if sec_idx < len(CLOSE_CHECKLIST) else f"Блок {sec_idx + 1}"
+            skip_lines.append(f"\n{sec_title}:")
+            for t in item_texts:
+                skip_lines.append(f"• {t}")
+        skipped_block = "\n".join(skip_lines)
+        owner_close_text += skipped_block
+        close_report_text += skipped_block
+
     work_chat_status = await notify_work_chat(bot, settings, close_report_text)
     if (
         settings.owner_id != settings.work_chat_id
@@ -2698,9 +2728,13 @@ async def close_wizard_callback(
         return
 
     if action == "finish_force":
-        await _answer(
-            "Принудительное закрытие отключено. Сначала завершите чек-лист.",
-            show_alert=True,
+        await _close_wizard_finalize(
+            callback=callback,
+            state=state,
+            db=db,
+            settings=settings,
+            bot=bot,
+            force=True,
         )
         return
 

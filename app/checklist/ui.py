@@ -294,4 +294,14 @@ def build_checklist_keyboard(
     if nav_row:
         rows.append(nav_row)
 
+    if checklist_type == "open" and shift_id is not None:
+        total = checklist_total_items("open")
+        if len(completed) < total:
+            rows.append([
+                InlineKeyboardButton(
+                    text=f"Открыть всё равно ({len(completed)}/{total})",
+                    callback_data=f"openforce:{shift_id}",
+                )
+            ])
+
     return InlineKeyboardMarkup(inline_keyboard=rows)

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -13,9 +16,10 @@ from urllib.request import Request as URLRequest
 from urllib.request import urlopen
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.dashboard.employees_service import (
     delete_schedule_entry,
@@ -45,9 +49,65 @@ BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 DASHBOARD_ROUTE = "/dashboard"
+_SESSION_COOKIE = "ds_session"
+_PUBLIC_PATHS = {"/login", "/logout"}
 logger = logging.getLogger(__name__)
 
+
+def _auth_secret() -> str:
+    return os.getenv("DASHBOARD_SECRET", "change-me-secret-key")
+
+
+def _auth_credentials() -> tuple[str, str]:
+    username = os.getenv("DASHBOARD_USERNAME", "").strip()
+    password = os.getenv("DASHBOARD_PASSWORD", "").strip()
+    return username, password
+
+
+def _auth_enabled() -> bool:
+    username, password = _auth_credentials()
+    return bool(username and password)
+
+
+def _make_session_token(username: str) -> str:
+    secret = _auth_secret()
+    sig = hmac.new(secret.encode(), username.encode(), hashlib.sha256).hexdigest()
+    payload = base64.urlsafe_b64encode(username.encode()).decode()
+    return f"{payload}.{sig}"
+
+
+def _verify_session_token(token: str) -> str | None:
+    try:
+        payload, sig = token.split(".", 1)
+        username = base64.urlsafe_b64decode(payload.encode()).decode()
+        secret = _auth_secret()
+        expected = hmac.new(secret.encode(), username.encode(), hashlib.sha256).hexdigest()
+        if hmac.compare_digest(sig, expected):
+            return username
+    except Exception:
+        pass
+    return None
+
+
+def _is_authenticated(request: Request) -> bool:
+    if not _auth_enabled():
+        return True
+    token = request.cookies.get(_SESSION_COOKIE, "")
+    return _verify_session_token(token) is not None
+
+
+class _AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if path in _PUBLIC_PATHS or path.startswith("/static"):
+            return await call_next(request)
+        if not _is_authenticated(request):
+            return RedirectResponse(url="/login", status_code=302)
+        return await call_next(request)
+
+
 app = FastAPI(title="Durum Dashboard")
+app.add_middleware(_AuthMiddleware)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
@@ -270,6 +330,50 @@ def icon_placeholder_head() -> Response:
         HTTP 204.
     """
     return Response(status_code=204)
+
+
+@app.get("/login")
+def login_page(request: Request):
+    if _is_authenticated(request):
+        return RedirectResponse(url=DASHBOARD_ROUTE, status_code=302)
+    return templates.TemplateResponse(request=request, name="login.html", context={})
+
+
+@app.post("/login")
+def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+):
+    expected_user, expected_pass = _auth_credentials()
+    ok = (
+        hmac.compare_digest(username.strip(), expected_user)
+        and hmac.compare_digest(password, expected_pass)
+    )
+    if not ok:
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={"error": "Неверный логин или пароль"},
+            status_code=401,
+        )
+    token = _make_session_token(username.strip())
+    response = RedirectResponse(url=DASHBOARD_ROUTE, status_code=302)
+    response.set_cookie(
+        key=_SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 30,
+    )
+    return response
+
+
+@app.get("/logout")
+def logout():
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie(key=_SESSION_COOKIE)
+    return response
 
 
 @app.get(DASHBOARD_ROUTE)
