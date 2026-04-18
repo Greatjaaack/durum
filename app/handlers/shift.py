@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Literal
 
 from aiogram import Bot, F, Router
@@ -264,6 +266,46 @@ CLOSE_WIZARD_STEPS_TOTAL = len(CLOSE_CHECKLIST)
 
 # Префикс callback_data для мастера закрытия смены.
 CLOSE_WIZARD_CALLBACK_PREFIX = "closewiz"
+
+
+async def _download_media_to_disk(
+    bot: Bot,
+    file_id: str,
+    shift_id: int,
+    item_index: int,
+    mime_type: str | None,
+    media_type: str,
+) -> str | None:
+    """Скачивает файл из Telegram и сохраняет на диск.
+
+    Args:
+        bot: Экземпляр Telegram-бота.
+        file_id: Telegram file_id.
+        shift_id: ID смены.
+        item_index: Индекс пункта чек-листа.
+        mime_type: MIME-тип файла.
+        media_type: Тип медиа ('open' или 'close').
+
+    Returns:
+        Путь к сохранённому файлу или None при ошибке.
+    """
+    media_root = Path(os.getenv("MEDIA_DIR", "data/media")) / media_type
+    media_root.mkdir(parents=True, exist_ok=True)
+    ext = ".jpg"
+    if mime_type:
+        if "png" in mime_type:
+            ext = ".png"
+        elif "gif" in mime_type:
+            ext = ".gif"
+        elif "pdf" in mime_type:
+            ext = ".pdf"
+    dest = media_root / f"{shift_id}_{item_index}{ext}"
+    try:
+        await bot.download(file_id, destination=str(dest))
+        return str(dest)
+    except Exception:
+        logger.exception("Failed to save media to disk file_id=%s shift_id=%s", file_id, shift_id)
+        return None
 
 
 def _close_wizard_fmt_number(value: float) -> str:
@@ -796,6 +838,14 @@ async def open_checklist_photo_input(
     open_items = flat_checklist_items("open")
     item_label = open_items[item_index] if item_index < len(open_items) else "Фото холодильника"
 
+    local_path = await _download_media_to_disk(
+        bot=bot,
+        file_id=media_file_id,
+        shift_id=shift_id,
+        item_index=item_index,
+        mime_type=media_mime_type,
+        media_type="open",
+    )
     await db.upsert_open_checklist_media(
         shift_id=shift_id,
         item_index=item_index,
@@ -804,6 +854,7 @@ async def open_checklist_photo_input(
         file_unique_id=media_file_unique_id,
         mime_type=media_mime_type,
         created_at=created_at,
+        local_path=local_path,
     )
 
     # Отмечаем пункт как выполненный
@@ -3338,6 +3389,14 @@ async def close_wizard_media_input(
             if message.date is not None
             else datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         )
+        local_path = await _download_media_to_disk(
+            bot=bot,
+            file_id=media_file_id,
+            shift_id=shift_id,
+            item_index=item.index,
+            mime_type=media_mime_type,
+            media_type="close",
+        )
         await db.upsert_close_checklist_media(
             shift_id=shift_id,
             item_index=item.index,
@@ -3346,6 +3405,7 @@ async def close_wizard_media_input(
             file_unique_id=media_file_unique_id,
             mime_type=media_mime_type,
             created_at=created_at,
+            local_path=local_path,
         )
         logger.debug(
             "Checklist media saved: shift_id=%s item_index=%s item=%r",

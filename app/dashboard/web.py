@@ -12,8 +12,7 @@ from zoneinfo import ZoneInfo
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request as URLRequest
-from urllib.request import urlopen
+from urllib.request import ProxyHandler, Request as URLRequest, build_opener
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -35,6 +34,7 @@ from app.db_schema import (
     ensure_employee_profiles_table as ensure_employee_profiles_schema_table,
     ensure_employee_schedule_entries_table as ensure_employee_schedule_entries_schema_table,
     ensure_last_mid_at_column as ensure_last_mid_at_schema_column,
+    ensure_media_local_path_columns as ensure_media_local_path_schema_columns,
     ensure_mid_started_at_column as ensure_mid_started_at_schema_column,
     ensure_mid_checklist_data_table as ensure_mid_checklist_data_schema_table,
     ensure_open_checklist_media_table as ensure_open_checklist_media_schema_table,
@@ -207,6 +207,7 @@ def _prepare_dashboard_schema() -> None:
         ensure_employee_profiles_schema_table(conn)
         ensure_employee_schedule_entries_schema_table(conn)
         ensure_shift_periodic_residuals_schema_table(conn)
+        ensure_media_local_path_schema_columns(conn)
     finally:
         conn.close()
 
@@ -250,6 +251,14 @@ def _normalize_date(
         return None
 
 
+def _telegram_opener():
+    """Возвращает urllib opener с поддержкой прокси из BOT_PROXY_URL."""
+    proxy_url = os.getenv("BOT_PROXY_URL", "").strip()
+    if proxy_url:
+        return build_opener(ProxyHandler({"http": proxy_url, "https": proxy_url}))
+    return build_opener()
+
+
 def _telegram_file_path(
     bot_token: str,
     file_id: str,
@@ -265,7 +274,8 @@ def _telegram_file_path(
     """
     payload = urlencode({"file_id": file_id}).encode("utf-8")
     request = URLRequest(f"https://api.telegram.org/bot{bot_token}/getFile", data=payload)
-    with urlopen(request, timeout=20) as response:
+    opener = _telegram_opener()
+    with opener.open(request, timeout=20) as response:
         data = json.loads(response.read().decode("utf-8"))
     if not isinstance(data, dict) or not data.get("ok"):
         return None
@@ -615,16 +625,12 @@ def _proxy_dashboard_media(
     Returns:
         Бинарный ответ изображения.
     """
-    bot_token = _dashboard_bot_token()
-    if not bot_token:
-        raise HTTPException(status_code=503, detail="BOT_TOKEN is not configured")
-
     conn = _connect()
     try:
         try:
             row = conn.execute(
                 f"""
-                SELECT file_id, mime_type
+                SELECT file_id, mime_type, local_path
                 FROM {table_name}
                 WHERE id = ?
                 LIMIT 1
@@ -639,9 +645,27 @@ def _proxy_dashboard_media(
     if row is None:
         raise HTTPException(status_code=404, detail="Photo not found")
 
+    mime_type = str(row["mime_type"] or "").strip() or "image/jpeg"
+
+    # Сначала пробуем отдать с диска
+    local_path = str(row["local_path"] or "").strip()
+    if local_path:
+        disk_file = Path(local_path)
+        if disk_file.is_file():
+            return Response(
+                content=disk_file.read_bytes(),
+                media_type=mime_type,
+                headers={"Cache-Control": "private, max-age=3600"},
+            )
+
+    # Fallback: проксируем из Telegram (для старых записей без local_path)
     file_id = str(row["file_id"] or "").strip()
     if not file_id:
         raise HTTPException(status_code=404, detail="Photo not found")
+
+    bot_token = _dashboard_bot_token()
+    if not bot_token:
+        raise HTTPException(status_code=503, detail="BOT_TOKEN is not configured")
 
     try:
         file_path = _telegram_file_path(bot_token, file_id)
@@ -649,7 +673,8 @@ def _proxy_dashboard_media(
             raise HTTPException(status_code=404, detail="Photo file is unavailable")
 
         file_request = URLRequest(f"https://api.telegram.org/file/bot{bot_token}/{file_path}")
-        with urlopen(file_request, timeout=25) as file_response:
+        opener = _telegram_opener()
+        with opener.open(file_request, timeout=25) as file_response:
             content = file_response.read()
             content_type = str(file_response.headers.get("Content-Type") or "").strip()
     except HTTPException:
@@ -669,9 +694,8 @@ def _proxy_dashboard_media(
         )
         raise HTTPException(status_code=500, detail="Unexpected media proxy error") from None
 
-    media_type = content_type or str(row["mime_type"] or "").strip() or "image/jpeg"
     return Response(
         content=content,
-        media_type=media_type,
+        media_type=content_type or mime_type,
         headers={"Cache-Control": "private, max-age=300"},
     )

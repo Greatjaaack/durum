@@ -650,3 +650,30 @@ def ensure_shift_periodic_residuals_table(
         conn.rollback()
         logger.exception("Migration ensure_shift_periodic_residuals_table failed")
         raise
+
+
+def ensure_media_local_path_columns(
+    conn: sqlite3.Connection,
+) -> None:
+    """Добавляет колонку local_path в таблицы медиа, если её нет.
+
+    Args:
+        conn: Подключение SQLite.
+
+    Returns:
+        None.
+    """
+    for table in ("close_checklist_media", "open_checklist_media"):
+        if not _table_exists(conn, table):
+            continue
+        cols = _table_columns(conn, table)
+        if "local_path" in cols:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN local_path TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            logger.exception("Migration ensure_media_local_path_columns failed for %s", table)
+            raise
+        raise

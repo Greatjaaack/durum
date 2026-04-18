@@ -880,6 +880,8 @@ def _build_shift_models(
                 # Сырые данные для Gantt
                 "open_time_raw": open_started_raw,
                 "opened_at_raw": opened_raw,
+                "mid_started_raw": mid_started_raw,
+                "last_mid_raw": last_mid_raw,
                 "close_started_raw": close_started_raw,
                 "closed_at_raw": closed_raw,
                 "employee_raw": str(row["employee"] or ""),
@@ -1137,6 +1139,8 @@ def _build_gantt_chart_data(
 
         open_started_dt = _parse_iso_datetime(str(shift.get("open_time_raw") or ""))
         opened_dt = _parse_iso_datetime(str(shift.get("opened_at_raw") or ""))
+        mid_started_dt = _parse_iso_datetime(str(shift.get("mid_started_raw") or ""))
+        last_mid_dt = _parse_iso_datetime(str(shift.get("last_mid_raw") or ""))
         close_started_dt = _parse_iso_datetime(str(shift.get("close_started_raw") or ""))
         closed_dt = _parse_iso_datetime(str(shift.get("closed_at_raw") or ""))
         is_open_shift = str(shift.get("status") or "").upper() == "OPEN"
@@ -1149,7 +1153,19 @@ def _build_gantt_chart_data(
                 return None
             return [s, e]
 
-        operation_end = close_started_dt or now_dt
+        # Конец операционного блока: закрытие > конец ведения > начало ведения >
+        # текущий момент (только если смена OPEN и ведение ещё не начиналось)
+        if close_started_dt:
+            operation_end = close_started_dt
+        elif last_mid_dt:
+            operation_end = last_mid_dt
+        elif mid_started_dt:
+            operation_end = mid_started_dt
+        elif is_open_shift:
+            operation_end = now_dt
+        else:
+            operation_end = None
+
         labels.append(date_label)
         opening_blocks.append(block(open_started_dt, opened_dt))
         operation_blocks.append(block(opened_dt, operation_end))

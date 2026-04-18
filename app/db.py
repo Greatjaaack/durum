@@ -17,6 +17,7 @@ from app.db_schema import (
     ensure_employee_profiles_table as ensure_employee_profiles_schema_table,
     ensure_employee_schedule_entries_table as ensure_employee_schedule_entries_schema_table,
     ensure_last_mid_at_column as ensure_last_mid_at_schema_column,
+    ensure_media_local_path_columns as ensure_media_local_path_schema_columns,
     ensure_mid_started_at_column as ensure_mid_started_at_schema_column,
     ensure_mid_checklist_data_table as ensure_mid_checklist_data_schema_table,
     ensure_open_checklist_media_table as ensure_open_checklist_media_schema_table,
@@ -316,6 +317,7 @@ class Database:
         await asyncio.to_thread(self._ensure_employee_profiles_table)
         await asyncio.to_thread(self._ensure_employee_schedule_entries_table)
         await asyncio.to_thread(self._ensure_shift_periodic_residuals_table)
+        await asyncio.to_thread(ensure_media_local_path_schema_columns, self._conn)
 
     async def create_shift(
         self,
@@ -654,6 +656,7 @@ class Database:
         file_unique_id: str | None,
         mime_type: str | None,
         created_at: str,
+        local_path: str | None = None,
     ) -> None:
         """Создаёт или обновляет фото для пункта закрытия смены.
 
@@ -665,6 +668,7 @@ class Database:
             file_unique_id: Telegram file_unique_id.
             mime_type: MIME-тип файла.
             created_at: Время фиксации фото.
+            local_path: Путь к файлу на диске (если скачан).
 
         Returns:
             None.
@@ -677,15 +681,17 @@ class Database:
             file_id,
             file_unique_id,
             mime_type,
-            created_at
+            created_at,
+            local_path
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(shift_id, item_index) DO UPDATE
         SET item_label = excluded.item_label,
             file_id = excluded.file_id,
             file_unique_id = excluded.file_unique_id,
             mime_type = excluded.mime_type,
-            created_at = excluded.created_at
+            created_at = excluded.created_at,
+            local_path = excluded.local_path
         """
         await asyncio.to_thread(
             self._execute,
@@ -698,6 +704,7 @@ class Database:
                 file_unique_id,
                 mime_type,
                 created_at,
+                local_path,
             ),
         )
 
@@ -750,6 +757,7 @@ class Database:
         file_unique_id: str | None,
         mime_type: str | None,
         created_at: str,
+        local_path: str | None = None,
     ) -> None:
         """Создаёт или обновляет фото для пункта открытия смены.
 
@@ -761,6 +769,7 @@ class Database:
             file_unique_id: Telegram file_unique_id.
             mime_type: MIME-тип файла.
             created_at: Время фиксации фото.
+            local_path: Путь к файлу на диске (если скачан).
 
         Returns:
             None.
@@ -773,15 +782,17 @@ class Database:
             file_id,
             file_unique_id,
             mime_type,
-            created_at
+            created_at,
+            local_path
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(shift_id, item_index) DO UPDATE
         SET item_label = excluded.item_label,
             file_id = excluded.file_id,
             file_unique_id = excluded.file_unique_id,
             mime_type = excluded.mime_type,
-            created_at = excluded.created_at
+            created_at = excluded.created_at,
+            local_path = excluded.local_path
         """
         await asyncio.to_thread(
             self._execute,
@@ -794,6 +805,7 @@ class Database:
                 file_unique_id,
                 mime_type,
                 created_at,
+                local_path,
             ),
         )
 

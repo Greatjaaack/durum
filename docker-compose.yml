@@ -6,6 +6,7 @@ services:
       - .env
     environment:
       DB_PATH: /data/shifts.db
+      MEDIA_DIR: /data/media
       LOG_DIR: /app/logs
       TZ: ${BOT_TIMEZONE:-Europe/Moscow}
     volumes:
@@ -26,6 +27,7 @@ services:
       - .env
     environment:
       DB_PATH: /data/shifts.db
+      MEDIA_DIR: /data/media
       TZ: ${BOT_TIMEZONE:-Europe/Moscow}
     command: ["python", "-m", "uvicorn", "app.dashboard:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
