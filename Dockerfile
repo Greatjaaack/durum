@@ -11,13 +11,15 @@ ENV POETRY_VERSION=1.8.3 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tzdata python3-venv gcc python3-dev \
+    && apt-get install -y --no-install-recommends tzdata python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python -m pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 
 COPY pyproject.toml poetry.lock* /app/
 RUN poetry install --no-ansi --only main --no-root
+
+RUN pip install --no-cache-dir aiohttp-socks
 
 COPY app/ /app/app/
 COPY README.md /app/README.md
