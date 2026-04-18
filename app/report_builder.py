@@ -45,9 +45,9 @@ async def build_daily_report(db: Database, report_date: str) -> str:
 
     stock_lines = []
     for item in ("мясо", "лаваш", "картофель"):
-        if item in stocks:
+        if item in stocks and stocks[item] is not None:
             unit = " кг" if item != "лаваш" else " шт"
-            stock_lines.append(f"{item}: {_fmt_number(stocks[item], unit)}")
+            stock_lines.append(f"{item}: {_fmt_number(float(stocks[item]), unit)}")
 
     order_lines = []
     for item, quantity in sorted(orders_agg.items()):

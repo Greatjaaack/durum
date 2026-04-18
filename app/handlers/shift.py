@@ -2546,7 +2546,7 @@ async def close_done_callback(
             log_context="close done callback",
         )
 
-    parts = callback.data.split(":")
+    parts = callback.data.split(":", 2)
     if len(parts) != 3:
         await _answer()
         return
