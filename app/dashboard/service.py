@@ -1153,17 +1153,15 @@ def _build_gantt_chart_data(
                 return None
             return [s, e]
 
-        # Конец операционного блока:
-        # - закрытие началось → до close_started_dt
-        # - ведение завершено → до last_mid_dt
-        # - ведение начато, но не завершено → блока нет (None)
-        # - ведение не начиналось, смена OPEN → до текущего момента
-        if close_started_dt:
+        # Если ведение начато но не завершено — блока нет вообще,
+        # даже если закрытие уже прошло.
+        mid_abandoned = mid_started_dt is not None and last_mid_dt is None
+        if mid_abandoned:
+            operation_end = None
+        elif close_started_dt:
             operation_end = close_started_dt
         elif last_mid_dt:
             operation_end = last_mid_dt
-        elif mid_started_dt:
-            operation_end = None
         elif is_open_shift:
             operation_end = now_dt
         else:
