@@ -23,7 +23,4 @@ COPY app/ /app/app/
 COPY README.md /app/README.md
 RUN mkdir -p /app/logs /data
 
-COPY camera_sync/ /app/camera_sync/
-RUN pip install --no-cache-dir -r /app/camera_sync/requirements.txt
-
 CMD ["python", "-m", "app.bot"]
