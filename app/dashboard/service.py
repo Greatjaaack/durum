@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone as _utc_tz
+from zoneinfo import ZoneInfo
 
 from app.checklist.data import (
     CLOSE_CHECKLIST,
@@ -13,6 +15,7 @@ from app.checklist.data import (
 )
 from app.checklist.ui import checklist_total_items
 
+_APP_TZ = ZoneInfo(os.getenv("BOT_TIMEZONE", "UTC"))
 
 # Максимальное количество строк смен на экране.
 DASHBOARD_SHIFTS_LIMIT = 250
@@ -197,6 +200,8 @@ def _fmt_time(
     """
     dt = _parse_iso_datetime(raw_value)
     if dt:
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(_APP_TZ)
         return dt.strftime("%H:%M")
 
     if not raw_value:
@@ -1058,7 +1063,7 @@ def _build_work_schedule_matrix(
 
 
 def _minutes_from_midnight(dt: datetime | None) -> int | None:
-    """Конвертирует datetime в минуты от полуночи.
+    """Конвертирует datetime в минуты от полуночи локального времени.
 
     Args:
         dt: Дата-время.
@@ -1068,6 +1073,8 @@ def _minutes_from_midnight(dt: datetime | None) -> int | None:
     """
     if dt is None:
         return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(_APP_TZ)
     return dt.hour * 60 + dt.minute
 
 
@@ -1103,7 +1110,9 @@ def _fmt_tooltip_phase(
     if start_dt is None or end_dt is None:
         return ""
     mins = _duration_minutes(start_dt, end_dt)
-    return f"{start_dt.strftime('%H:%M')} — {end_dt.strftime('%H:%M')} ({format_duration(mins)})"
+    s = start_dt.astimezone(_APP_TZ) if start_dt.tzinfo is not None else start_dt
+    e = end_dt.astimezone(_APP_TZ) if end_dt.tzinfo is not None else end_dt
+    return f"{s.strftime('%H:%M')} — {e.strftime('%H:%M')} ({format_duration(mins)})"
 
 
 def _build_gantt_chart_data(
@@ -1147,9 +1156,15 @@ def _build_gantt_chart_data(
         now_dt = datetime.now(_utc_tz.utc) if is_open_shift else None
 
         def block(start: datetime | None, end: datetime | None) -> list[int] | None:
-            s = _clamp(_minutes_from_midnight(start), GANTT_MIN, GANTT_MAX)
-            e = _clamp(_minutes_from_midnight(end), GANTT_MIN, GANTT_MAX)
-            if s is None or e is None or e <= s:
+            s = _minutes_from_midnight(start)
+            e = _minutes_from_midnight(end)
+            if s is None or e is None:
+                return None
+            if e < s:
+                e += 1440  # переход через полночь
+            s = _clamp(s, GANTT_MIN, GANTT_MAX)
+            e = _clamp(e, GANTT_MIN, GANTT_MAX)
+            if e <= s:
                 return None
             return [s, e]
 

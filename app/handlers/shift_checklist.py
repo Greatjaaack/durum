@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
@@ -309,7 +309,7 @@ async def checklist_callback(
                 await _answer("Чек-лист завершён.")
                 await db.update_shift_last_mid(
                     shift_id,
-                    datetime.now(timezone.utc).isoformat(),
+                    now_local(settings).isoformat(timespec="seconds"),
                 )
                 await db.delete_checklist_state(shift_id, "mid")
                 await state.clear()
@@ -351,7 +351,7 @@ async def checklist_callback(
             if just_completed:
                 await db.update_shift_opened_at(
                     shift_id,
-                    datetime.now(timezone.utc).isoformat(),
+                    now_local(settings).isoformat(timespec="seconds"),
                 )
             await state.clear()
             await callback.message.answer(
@@ -429,7 +429,7 @@ async def open_force_callback(
     keys = checklist_state_keys("open")
     completed = restore_completed_indexes(state_data, keys["done_key"], saved_state)
 
-    await db.update_shift_opened_at(shift_id, datetime.now(timezone.utc).isoformat())
+    await db.update_shift_opened_at(shift_id, now_local(settings).isoformat(timespec="seconds"))
 
     user = callback.from_user
     display_name = await db.get_employee_display_name(user.id)

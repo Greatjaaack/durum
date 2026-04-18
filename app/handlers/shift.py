@@ -4,7 +4,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -818,11 +818,7 @@ async def open_checklist_photo_input(
         await message.answer("Не удалось получить фото. Попробуйте ещё раз.")
         return
 
-    created_at = (
-        message.date.isoformat()
-        if message.date is not None
-        else datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    )
+    created_at = now_local(settings).isoformat(timespec="seconds")
 
     open_items = flat_checklist_items("open")
     item_label = open_items[item_index] if item_index < len(open_items) else "Фото холодильника"
@@ -894,6 +890,7 @@ async def mid_checklist_numeric_input(
     message: Message,
     state: FSMContext,
     db: Database,
+    settings: Settings,
 ) -> None:
     """Принимает числовой ввод для пункта ведения смены.
 
@@ -945,11 +942,7 @@ async def mid_checklist_numeric_input(
 
     unit = str(cfg.get("unit", ""))
     key = str(cfg.get("key", ""))
-    created_at = (
-        message.date.isoformat()
-        if message.date is not None
-        else datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    )
+    created_at = now_local(settings).isoformat(timespec="seconds")
 
     await db.upsert_mid_checklist_data(
         shift_id=shift_id,
@@ -986,7 +979,7 @@ async def mid_checklist_numeric_input(
     await message.answer(f"✅ Записано: {display_value} {unit}")
 
     if len(completed) >= mid_total:
-        await db.update_shift_last_mid(shift_id, datetime.now(timezone.utc).isoformat())
+        await db.update_shift_last_mid(shift_id, now_local(settings).isoformat(timespec="seconds"))
         await message.answer(
             "✅ Чек-лист ведения смены завершён.",
             reply_markup=build_shift_menu_keyboard(is_shift_open=True),
@@ -1001,6 +994,7 @@ async def mid_shift(
     message: Message,
     state: FSMContext,
     db: Database,
+    settings: Settings,
 ) -> None:
     """Запускает чек-лист ведения для активной смены.
 
@@ -1024,7 +1018,7 @@ async def mid_shift(
         return
 
     shift_id = int(active_shift["id"])
-    await db.update_shift_mid_started_at(shift_id, datetime.now(timezone.utc).isoformat())
+    await db.update_shift_mid_started_at(shift_id, now_local(settings).isoformat(timespec="seconds"))
     await state.clear()
     await _start_checklist(message, state, db, "mid", shift_id)
 
@@ -3373,11 +3367,7 @@ async def close_wizard_media_input(
         media_mime_type = str(message.document.mime_type or "").strip() or None
 
     if media_file_id:
-        created_at = (
-            message.date.isoformat()
-            if message.date is not None
-            else datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-        )
+        created_at = now_local(settings).isoformat(timespec="seconds")
         local_path = await _download_media_to_disk(
             bot=bot,
             file_id=media_file_id,
@@ -3535,6 +3525,7 @@ async def periodic_residuals_collect(
     message: Message,
     state: FSMContext,
     db: Database,
+    settings: Settings,
 ) -> None:
     """Принимает ввод текущей позиции периодических остатков."""
     if not message.from_user or not message.text:
@@ -3573,7 +3564,7 @@ async def periodic_residuals_collect(
 
     unit = str(item_cfg.get("unit", ""))
     key = str(item_cfg.get("key", ""))
-    recorded_at = datetime.now(timezone.utc).isoformat()
+    recorded_at = now_local(settings).isoformat(timespec="seconds")
 
     await db.insert_periodic_residual(
         shift_id=shift_id,
