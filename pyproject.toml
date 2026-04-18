@@ -16,7 +16,8 @@ uvicorn = {version = "^0.38.0", extras = ["standard"]}
 jinja2 = "^3.1.6"
 pyyaml = "^6.0.2"
 python-multipart = "^0.0.9"
-aiohttp-socks = "^0.8.4"
+aiohttp-socks = ">=0.8.4"
+aiohttp = ">=3.9.0,<3.10.0"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]
