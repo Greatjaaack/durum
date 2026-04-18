@@ -3048,7 +3048,7 @@ async def close_wizard_callback(
             settings=settings,
             employee=f"@{callback.from_user.username}"
             if callback.from_user.username
-            else callback.from_user.full_name,
+            else (callback.from_user.full_name or "—"),
             employee_id=callback.from_user.id,
             shift_id=shift_id,
             item=item,

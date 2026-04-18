@@ -319,7 +319,7 @@ async def checklist_callback(
                 )
                 user = callback.from_user
                 display_name = await db.get_employee_display_name(user.id)
-                name = display_name or (f"@{user.username}" if user.username else user.full_name)
+                name = display_name or (f"@{user.username}" if user.username else (user.full_name or "—"))
                 mid_time = now_local(settings).strftime("%H:%M")
                 await notify_work_chat(
                     bot,
@@ -360,7 +360,7 @@ async def checklist_callback(
             )
             user = callback.from_user
             display_name = await db.get_employee_display_name(user.id)
-            name = display_name or (f"@{user.username}" if user.username else user.full_name)
+            name = display_name or (f"@{user.username}" if user.username else (user.full_name or "—"))
             open_time = now_local(settings).strftime("%H:%M")
             await notify_work_chat(
                 bot,
@@ -433,7 +433,7 @@ async def open_force_callback(
 
     user = callback.from_user
     display_name = await db.get_employee_display_name(user.id)
-    name = display_name or (f"@{user.username}" if user.username else user.full_name)
+    name = display_name or (f"@{user.username}" if user.username else (user.full_name or "—"))
     open_time = now_local(settings).strftime("%H:%M")
 
     await notify_work_chat(bot, settings, _build_open_notification_text(name, open_time, completed))

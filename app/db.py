@@ -374,14 +374,12 @@ class Database:
         Returns:
             Данные активной смены или None.
         """
-        query = """
-        SELECT *
-        FROM shifts
-        WHERE status = 'OPEN'
-        ORDER BY id DESC
-        LIMIT 1
-        """
-        return await asyncio.to_thread(self._fetchone, query, ())
+        query = "SELECT * FROM shifts WHERE status = 'OPEN' ORDER BY id DESC"
+        rows = await asyncio.to_thread(self._fetchall, query, ())
+        if len(rows) > 1:
+            ids = [r["id"] for r in rows]
+            logger.warning("Multiple OPEN shifts detected: ids=%s — data integrity issue", ids)
+        return rows[0] if rows else None
 
     async def get_active_shifts(
         self,

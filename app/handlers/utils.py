@@ -75,7 +75,7 @@ def employee_name(
         return "Unknown employee"
     if user.username:
         return f"@{user.username}"
-    return user.full_name
+    return user.full_name or "—"
 
 
 def now_local(
