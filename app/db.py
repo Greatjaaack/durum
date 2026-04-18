@@ -200,6 +200,11 @@ class Database:
         with self._lock:
             ensure_shift_periodic_residuals_schema_table(self._conn)
 
+    def _ensure_media_local_path_columns(self) -> None:
+        """Добавляет колонку local_path в таблицы медиа."""
+        with self._lock:
+            ensure_media_local_path_schema_columns(self._conn)
+
     async def init(self, today: str | None = None) -> None:
         """Инициализирует схему базы данных и миграции.
 
@@ -317,7 +322,7 @@ class Database:
         await asyncio.to_thread(self._ensure_employee_profiles_table)
         await asyncio.to_thread(self._ensure_employee_schedule_entries_table)
         await asyncio.to_thread(self._ensure_shift_periodic_residuals_table)
-        await asyncio.to_thread(ensure_media_local_path_schema_columns, self._conn)
+        await asyncio.to_thread(self._ensure_media_local_path_columns)
 
     async def create_shift(
         self,

@@ -663,7 +663,8 @@ def ensure_media_local_path_columns(
     Returns:
         None.
     """
-    for table in ("close_checklist_media", "open_checklist_media"):
+    _allowed = {"close_checklist_media", "open_checklist_media"}
+    for table in _allowed:
         if not _table_exists(conn, table):
             continue
         cols = _table_columns(conn, table)
@@ -676,4 +677,3 @@ def ensure_media_local_path_columns(
             conn.rollback()
             logger.exception("Migration ensure_media_local_path_columns failed for %s", table)
             raise
-        raise

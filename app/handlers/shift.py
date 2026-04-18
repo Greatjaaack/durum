@@ -308,17 +308,6 @@ async def _download_media_to_disk(
         return None
 
 
-def _close_wizard_fmt_number(value: float) -> str:
-    """Форматирует число без лишних нулей.
-
-    Args:
-        value: Число для отображения.
-
-    Returns:
-        Отформатированная строка.
-    """
-    return f"{value:.3f}".rstrip("0").rstrip(".")
-
 
 def close_wizard_item_by_index(index: int) -> CloseWizardItem | None:
     """Возвращает пункт мастера по индексу.
@@ -517,7 +506,7 @@ def build_close_wizard_question_text(
         lines.append(item.input_rule.prompt)
         if item.residual_key and item.residual_key in values:
             lines.append(
-                f"Сейчас: {_close_wizard_fmt_number(values[item.residual_key])} {item.input_rule.display_unit}"
+                f"Сейчас: {fmt_number(values[item.residual_key])} {item.input_rule.display_unit}"
             )
     else:
         lines.append(_close_wizard_as_question_text(item.text))
