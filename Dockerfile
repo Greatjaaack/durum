@@ -19,8 +19,6 @@ RUN python -m pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 COPY pyproject.toml poetry.lock* /app/
 RUN poetry install --no-ansi --only main --no-root
 
-RUN pip install --no-cache-dir aiohttp-socks
-
 COPY app/ /app/app/
 COPY README.md /app/README.md
 RUN mkdir -p /app/logs /data
