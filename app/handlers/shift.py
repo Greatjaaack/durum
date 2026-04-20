@@ -727,13 +727,7 @@ async def open_shift(
     active_shift = await db.get_active_shift()
     if active_shift:
         shift_id = int(active_shift["id"])
-        open_state = await db.get_checklist_state(
-            shift_id=shift_id,
-            checklist_type="open",
-        )
-        open_done = len(open_state.get("completed", [])) if open_state else 0
-        open_total = checklist_total_items("open")
-        if open_done < open_total:
+        if not active_shift.get("opened_at"):
             await state.clear()
             await message.answer("Смена уже открыта. Продолжим чек-лист открытия.")
             await _start_checklist(message, state, db, "open", shift_id)
@@ -1054,19 +1048,9 @@ async def close_shift_start(
         return
 
     shift_id = int(active_shift["id"])
-    open_state = await db.get_checklist_state(
-        shift_id=shift_id,
-        checklist_type="open",
-    )
-    open_done = len(open_state.get("completed", [])) if open_state else 0
-    open_total = checklist_total_items("open")
-    if open_done < open_total:
-        remaining = max(0, open_total - open_done)
+    if not active_shift.get("opened_at"):
         await state.clear()
-        await message.answer(
-            "Нельзя закрыть смену, пока не завершён чек-лист открытия.\n"
-            f"Осталось: {remaining} {_close_wizard_count_suffix(remaining)}."
-        )
+        await message.answer("Нельзя закрыть смену, пока не завершён чек-лист открытия.")
         await _start_checklist(message, state, db, "open", shift_id)
         return
 
