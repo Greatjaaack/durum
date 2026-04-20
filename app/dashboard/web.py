@@ -10,6 +10,9 @@ import sqlite3
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
+
+from dotenv import load_dotenv
+load_dotenv(override=False)
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import ProxyHandler, Request as URLRequest, build_opener
