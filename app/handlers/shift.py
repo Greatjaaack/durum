@@ -862,6 +862,7 @@ async def open_checklist_photo_input(
     await safe_delete_message(message, log_context="open checklist photo input")
 
     if len(completed) >= open_total:
+        await db.update_shift_opened_at(shift_id, now_local(settings).isoformat(timespec="seconds"))
         await message.answer(
             "Смена открыта ✅",
             reply_markup=build_shift_menu_keyboard(is_shift_open=True),
@@ -1009,6 +1010,10 @@ async def mid_shift(
             "Сначала откройте смену.",
             reply_markup=build_shift_menu_keyboard(is_shift_open=False),
         )
+        return
+
+    if not active_shift.get("opened_at"):
+        await message.answer("Сначала завершите чек-лист открытия смены.")
         return
 
     shift_id = int(active_shift["id"])
