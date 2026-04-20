@@ -350,11 +350,10 @@ class Database:
             employee_id,
             date,
             open_time,
-            opened_at,
             opened_by,
             status
         )
-        VALUES (?, ?, ?, ?, ?, ?, 'OPEN')
+        VALUES (?, ?, ?, ?, ?, 'OPEN')
         """
         return await asyncio.to_thread(
             self._execute,
@@ -363,7 +362,6 @@ class Database:
                 employee,
                 employee_id,
                 shift_date,
-                open_time,
                 open_time,
                 employee,
             ),
