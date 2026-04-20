@@ -175,8 +175,9 @@ def _connect() -> sqlite3.Connection:
     Returns:
         Подключение SQLite.
     """
-    conn = sqlite3.connect(_dashboard_db_path())
+    conn = sqlite3.connect(_dashboard_db_path(), timeout=10.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -226,6 +227,18 @@ def dashboard_startup() -> None:
         _prepare_dashboard_schema()
     except sqlite3.Error:
         logger.exception("Failed to prepare dashboard schema on startup")
+
+    db_path = _dashboard_db_path()
+    exists = db_path.exists()
+    logger.info("Dashboard DB path: %s (exists=%s)", db_path, exists)
+    if exists:
+        try:
+            conn = _connect()
+            count = conn.execute("SELECT COUNT(*) FROM shifts").fetchone()[0]
+            conn.close()
+            logger.info("Dashboard DB shifts count: %d", count)
+        except Exception:
+            logger.exception("Dashboard DB diagnostic query failed")
 
 
 def _normalize_date(
