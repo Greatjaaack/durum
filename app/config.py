@@ -32,6 +32,7 @@ class Settings:
     bot_token: str
     owner_id: int
     work_chat_id: int
+    work_chat_thread_id: int | None
     db_path: Path
     log_dir: Path
     timezone: str
@@ -91,6 +92,15 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
         except ValueError as exc:
             raise RuntimeError("WORK_CHAT_ID must be an integer Telegram chat id") from exc
 
+    work_chat_thread_id_raw = os.getenv("WORK_CHAT_THREAD_ID", "").strip()
+    if not work_chat_thread_id_raw:
+        work_chat_thread_id: int | None = None
+    else:
+        try:
+            work_chat_thread_id = int(work_chat_thread_id_raw)
+        except ValueError as exc:
+            raise RuntimeError("WORK_CHAT_THREAD_ID must be an integer topic id") from exc
+
     db_path = Path(os.getenv("DB_PATH", DEFAULT_DB_PATH)).expanduser()
     log_dir = Path(os.getenv("LOG_DIR", DEFAULT_LOG_DIR)).expanduser()
     timezone = os.getenv("BOT_TIMEZONE", DEFAULT_TIMEZONE)
@@ -114,6 +124,7 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
         bot_token=bot_token,
         owner_id=owner_id,
         work_chat_id=work_chat_id,
+        work_chat_thread_id=work_chat_thread_id,
         db_path=db_path,
         log_dir=log_dir,
         timezone=timezone,
