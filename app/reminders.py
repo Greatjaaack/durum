@@ -247,6 +247,7 @@ def setup_scheduler(
             await bot.send_message(
                 settings.work_chat_id,
                 INCOMPLETE_CLOSE_CHECKLIST_TEXT,
+                message_thread_id=settings.work_chat_thread_id,
             )
             logger.info("Work chat notified: incomplete close checklist")
         except Exception:

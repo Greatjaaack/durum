@@ -303,7 +303,11 @@ async def notify_work_chat(
         `failed`, если отправить не удалось.
     """
     try:
-        await bot.send_message(settings.work_chat_id, text)
+        await bot.send_message(
+            settings.work_chat_id,
+            text,
+            message_thread_id=settings.work_chat_thread_id,
+        )
         return "work_chat"
     except TelegramBadRequest as error:
         if "chat not found" in str(error).lower():
