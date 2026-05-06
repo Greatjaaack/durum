@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 from datetime import datetime, time, timedelta, timezone as _utc_tz
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
@@ -16,33 +13,6 @@ from app.config import Settings
 from app.db import Database
 
 logger = logging.getLogger(__name__)
-
-# Пути к camera_sync скрипту и его интерпретатору Python
-_CAMERA_SYNC_SCRIPT = Path(__file__).parent.parent / "camera_sync" / "sync_to_db.py"
-_CAMERA_SYNC_PYTHON = Path(__file__).parent.parent / "camera_sync" / "venv" / "bin" / "python"
-
-
-async def _run_camera_sync(db_path: Path) -> None:
-    """Запускает sync_to_db.py в отдельном процессе с venv камеры."""
-    if not _CAMERA_SYNC_SCRIPT.exists() or not _CAMERA_SYNC_PYTHON.exists():
-        logger.debug("camera_sync: скрипт или venv не найдены, пропускаем")
-        return
-    env = {**os.environ, "DB_PATH": str(db_path)}
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            str(_CAMERA_SYNC_PYTHON),
-            str(_CAMERA_SYNC_SCRIPT),
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            logger.warning("camera_sync завершился с ошибкой: %s", stderr.decode()[:500])
-        else:
-            logger.info("camera_sync: %s", stdout.decode().strip()[:300])
-    except Exception:
-        logger.exception("camera_sync: ошибка запуска процесса")
 
 # Текст напоминания о необходимости заказа продукции.
 PRODUCT_ORDER_REMINDER_TEXT = "Проверьте необходимость заказа продукции."
@@ -63,7 +33,10 @@ PRODUCT_ORDER_REMINDER_HOUR = 19
 PRODUCT_ORDER_REMINDER_MINUTE = 0
 
 # Смещение (в минутах) для дедлайна открытия смены относительно времени старта.
-OPENING_DEADLINE_OFFSET_MIN = -60
+# Положительное значение = проверка ПОСЛЕ времени старта (например, +30 при
+# SHIFT_OPEN_TIME=11:00 → проверка в 11:30). Если смена не открыта к этому
+# моменту — владельцу уходит уведомление.
+OPENING_DEADLINE_OFFSET_MIN = 30
 
 # Смещение (в минутах) для первого напоминания после времени закрытия смены.
 CLOSE_CHECKLIST_FIRST_REMINDER_OFFSET_MIN = 90
@@ -368,12 +341,4 @@ def setup_scheduler(
         id="periodic_reminder",
         replace_existing=True,
     )
-    # camera_sync отключён
-    # scheduler.add_job(
-    #     _run_camera_sync,
-    #     trigger=CronTrigger(minute=0, timezone=timezone),
-    #     args=[settings.db_path],
-    #     id="camera_sync",
-    #     replace_existing=True,
-    # )
     return scheduler

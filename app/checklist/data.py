@@ -27,6 +27,10 @@ def _load_config() -> dict[str, object]:
 def _normalize_sections(raw: object, field_name: str) -> list[dict[str, object]]:
     """Приводит список секций к ожидаемому формату.
 
+    Каждый пункт можно задать строкой или мапой ``{text, requires_photo}``.
+    Опции пунктов сохраняются в ``item_options`` (карта по тексту пункта),
+    а ``items`` остаётся плоским списком строк для обратной совместимости.
+
     Args:
         raw: Сырые данные секций.
         field_name: Имя поля для сообщения об ошибке.
@@ -47,8 +51,33 @@ def _normalize_sections(raw: object, field_name: str) -> list[dict[str, object]]
             raise ValueError(f"{field_name}[{index}] title is required")
         if not isinstance(items_raw, list):
             raise ValueError(f"{field_name}[{index}].items must be a list")
-        items = [str(item).strip() for item in items_raw if str(item).strip()]
-        sections.append({"title": title, "items": items})
+
+        items: list[str] = []
+        item_options: dict[str, dict[str, object]] = {}
+        for item_index, item_raw in enumerate(items_raw):
+            if isinstance(item_raw, str):
+                text = item_raw.strip()
+                options: dict[str, object] = {}
+            elif isinstance(item_raw, dict):
+                text = str(item_raw.get("text", "")).strip()
+                if not text:
+                    raise ValueError(
+                        f"{field_name}[{index}].items[{item_index}].text is required"
+                    )
+                options = {}
+                requires_photo = item_raw.get("requires_photo")
+                if requires_photo is not None:
+                    options["requires_photo"] = bool(requires_photo)
+            else:
+                raise ValueError(
+                    f"{field_name}[{index}].items[{item_index}] must be a string or mapping"
+                )
+            if not text:
+                continue
+            items.append(text)
+            if options:
+                item_options[text] = options
+        sections.append({"title": title, "items": items, "item_options": item_options})
     return sections
 
 
@@ -147,6 +176,12 @@ def _normalize_residual_inputs(raw: object) -> dict[str, dict[str, object]]:
         )
         if not checklist_item:
             checklist_item = item_label
+        section_title_raw = config_raw.get("section_title")
+        section_title = (
+            str(section_title_raw).strip()
+            if isinstance(section_title_raw, str)
+            else ""
+        )
         stock_item_raw = config_raw.get("stock_item")
         stock_item = str(stock_item_raw).strip() if isinstance(stock_item_raw, str) else None
         stock_item = stock_item or None
@@ -162,6 +197,7 @@ def _normalize_residual_inputs(raw: object) -> dict[str, dict[str, object]]:
             "prompt": prompt,
             "unit": unit,
             "checklist_item": checklist_item,
+            "section_title": section_title,
             "stock_item": stock_item,
         }
 
@@ -211,11 +247,64 @@ CLOSE_RESIDUAL_INPUTS_BY_CHECKLIST_ITEM = {
     )
 }
 
+# Словарь остатков, индексированный парой (секция, текст пункта).
+# Используется при сборке мастера закрытия, чтобы один и тот же текст пункта
+# в разных секциях (например, «Сроки годности» vs «Убрать продукты»)
+# не приводил к задвоению ввода остатков.
+CLOSE_RESIDUAL_INPUTS_BY_SECTION_AND_ITEM: dict[tuple[str, str], dict[str, object]] = {}
+for _item_label, _config in CLOSE_RESIDUAL_INPUTS.items():
+    _checklist_item = str(_config.get("checklist_item") or _item_label).strip()
+    _section_title = str(_config.get("section_title") or "").strip()
+    if not _checklist_item or not _section_title:
+        continue
+    CLOSE_RESIDUAL_INPUTS_BY_SECTION_AND_ITEM[(_section_title, _checklist_item)] = _config
+
 CHECKLISTS = {
     "open": OPEN_CHECKLIST,
     "mid": MID_CHECKLIST,
     "close": CLOSE_CHECKLIST,
 }
+
+
+def checklist_item_options(
+    checklist_type: str,
+    item_index: int,
+) -> dict[str, object]:
+    """Возвращает опции пункта чек-листа по его глобальному индексу.
+
+    Args:
+        checklist_type: Тип чек-листа ('open', 'mid', 'close').
+        item_index: Глобальный индекс пункта в плоском списке.
+
+    Returns:
+        Словарь опций (например, ``requires_photo``); пустой словарь если опций нет.
+    """
+    sections = CHECKLISTS.get(checklist_type, [])
+    cursor = 0
+    for section in sections:
+        items = section.get("items", []) or []
+        section_len = len(items)
+        if cursor <= item_index < cursor + section_len:
+            local_index = item_index - cursor
+            text = str(items[local_index])
+            options_map = section.get("item_options", {}) or {}
+            options = options_map.get(text, {})
+            return dict(options) if options else {}
+        cursor += section_len
+    return {}
+
+
+def checklist_item_requires_photo(checklist_type: str, item_index: int) -> bool:
+    """Возвращает True, если для пункта обязательно фото.
+
+    Args:
+        checklist_type: Тип чек-листа.
+        item_index: Глобальный индекс пункта.
+
+    Returns:
+        Признак обязательного фото.
+    """
+    return bool(checklist_item_options(checklist_type, item_index).get("requires_photo", False))
 
 
 def flat_checklist_items(checklist_type: str) -> list[str]:

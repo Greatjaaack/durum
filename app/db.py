@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 from app.db_schema import (
     close_stale_open_shifts as close_stale_open_shifts_schema,
-    ensure_camera_tables as ensure_camera_tables_schema,
+    drop_camera_tables as drop_camera_tables_schema,
     ensure_close_residual_columns as ensure_close_residual_schema_columns,
     ensure_employee_profiles_table as ensure_employee_profiles_schema_table,
     ensure_employee_schedule_entries_table as ensure_employee_schedule_entries_schema_table,
@@ -25,6 +25,7 @@ from app.db_schema import (
     ensure_shift_periodic_residuals_table as ensure_shift_periodic_residuals_schema_table,
     ensure_shift_status_column as ensure_shift_status_schema_column,
     ensure_shift_status_index as ensure_shift_status_schema_index,
+    force_close_all_open_shifts as force_close_all_open_shifts_schema,
 )
 
 
@@ -161,6 +162,23 @@ class Database:
         with self._lock:
             close_stale_open_shifts_schema(self._conn, today=today)
 
+    async def force_close_all_open_shifts(self) -> int:
+        """Принудительно закрывает ВСЕ смены со статусом OPEN.
+
+        Используется при старте бота, если выставлен флаг
+        ``FORCE_CLOSE_OPEN_SHIFTS_ON_START``. Полезно при выкатке релиза,
+        который меняет нумерацию пунктов чек-листа или поведение FSM —
+        чтобы не оставить сотрудника в «висящем» состоянии.
+
+        Returns:
+            Количество закрытых смен.
+        """
+        def _do() -> int:
+            with self._lock:
+                return force_close_all_open_shifts_schema(self._conn)
+
+        return await asyncio.to_thread(_do)
+
     def _ensure_last_mid_at_column(self) -> None:
         """Добавляет колонку last_mid_at в таблицу shifts."""
         with self._lock:
@@ -181,11 +199,6 @@ class Database:
         with self._lock:
             ensure_mid_checklist_data_schema_table(self._conn)
 
-    def _ensure_camera_tables(self) -> None:
-        """Создаёт таблицы camera_devices и camera_videos."""
-        with self._lock:
-            ensure_camera_tables_schema(self._conn)
-
     def _ensure_employee_profiles_table(self) -> None:
         """Создаёт таблицу employee_profiles."""
         with self._lock:
@@ -205,6 +218,13 @@ class Database:
         """Добавляет колонку local_path в таблицы медиа."""
         with self._lock:
             ensure_media_local_path_schema_columns(self._conn)
+
+    def _drop_camera_tables(self) -> None:
+        """Удаляет наследие выпиленной camera_sync-фичи (DROP IF EXISTS)."""
+        with self._lock:
+            dropped = drop_camera_tables_schema(self._conn)
+        if dropped:
+            logger.info("Dropped %d legacy camera_* table(s)", dropped)
 
     async def init(self, today: str | None = None) -> None:
         """Инициализирует схему базы данных и миграции.
@@ -324,6 +344,7 @@ class Database:
         await asyncio.to_thread(self._ensure_employee_schedule_entries_table)
         await asyncio.to_thread(self._ensure_shift_periodic_residuals_table)
         await asyncio.to_thread(self._ensure_media_local_path_columns)
+        await asyncio.to_thread(self._drop_camera_tables)
 
     async def create_shift(
         self,
@@ -811,27 +832,6 @@ class Database:
             ),
         )
 
-    async def get_open_checklist_media(
-        self,
-        shift_id: int,
-        item_index: int,
-    ) -> dict[str, Any] | None:
-        """Возвращает фото пункта открытия смены.
-
-        Args:
-            shift_id: Идентификатор смены.
-            item_index: Индекс пункта.
-
-        Returns:
-            Словарь с данными фото или None.
-        """
-        query = """
-        SELECT * FROM open_checklist_media
-        WHERE shift_id = ? AND item_index = ?
-        LIMIT 1
-        """
-        return await asyncio.to_thread(self._fetchone, query, (shift_id, item_index))
-
     async def upsert_mid_checklist_data(
         self,
         *,
@@ -975,6 +975,12 @@ class Database:
 
         return await asyncio.to_thread(_close_shift_atomic)
 
+    # NOTE: save_order сейчас никем не вызывается, но таблица `orders`
+    # по-прежнему читается в `app/report_builder.py` через
+    # `get_orders_by_date`. Без writer-а блок «Заказы» в отчётах всегда
+    # пуст. Если фича заказов больше не нужна — удали таблицу `orders`,
+    # `save_order` и `get_orders_by_date` целиком; иначе восстанови
+    # writer-handler.
     async def save_order(
         self,
         *,
@@ -1042,23 +1048,6 @@ class Database:
             query,
             (item, quantity, stock_date, employee, employee_id, stock_time),
         )
-
-    async def get_active_employee_ids(self) -> list[int]:
-        """Возвращает список сотрудников с открытыми сменами.
-
-        Args:
-            Нет параметров.
-
-        Returns:
-            Список Telegram ID сотрудников.
-        """
-        query = """
-        SELECT DISTINCT employee_id
-        FROM shifts
-        WHERE status = 'OPEN'
-        """
-        rows = await asyncio.to_thread(self._fetchall, query)
-        return [int(row["employee_id"]) for row in rows]
 
     async def get_employee_display_name(self, telegram_id: int) -> str | None:
         """Возвращает display_name сотрудника из employee_profiles или None.
@@ -1354,25 +1343,6 @@ class Database:
             query,
             (shift_id, key, value, unit, recorded_at),
         )
-
-    async def get_periodic_residuals_for_shift(
-        self,
-        shift_id: int,
-    ) -> list[dict[str, Any]]:
-        """Возвращает периодические остатки смены.
-
-        Args:
-            shift_id: Идентификатор смены.
-
-        Returns:
-            Список словарей, отсортированных по recorded_at.
-        """
-        query = """
-        SELECT * FROM shift_periodic_residuals
-        WHERE shift_id = ?
-        ORDER BY recorded_at
-        """
-        return await asyncio.to_thread(self._fetchall, query, (shift_id,))
 
     async def close(self) -> None:
         """Закрывает подключение к базе данных.

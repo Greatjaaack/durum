@@ -39,6 +39,19 @@ class Settings:
     shift_open_time: time
     shift_close_time: time
     bot_proxy_url: str | None
+    force_close_open_shifts_on_start: bool
+
+
+def _parse_bool_env(raw: str) -> bool:
+    """Преобразует строковую переменную окружения к bool.
+
+    Args:
+        raw: Сырое значение из окружения.
+
+    Returns:
+        True для значений 1/true/yes/on (без учёта регистра).
+    """
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _parse_time_hhmm(raw: str, *, var_name: str, default: str) -> time:
@@ -120,6 +133,10 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
         default=DEFAULT_SHIFT_CLOSE_TIME,
     )
 
+    force_close_open_shifts_on_start = _parse_bool_env(
+        os.getenv("FORCE_CLOSE_OPEN_SHIFTS_ON_START", "")
+    )
+
     return Settings(
         bot_token=bot_token,
         owner_id=owner_id,
@@ -131,4 +148,5 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
         shift_open_time=shift_open_time,
         shift_close_time=shift_close_time,
         bot_proxy_url=bot_proxy_url,
+        force_close_open_shifts_on_start=force_close_open_shifts_on_start,
     )
