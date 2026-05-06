@@ -7,7 +7,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
 from app.checklist.callbacks import CHECKLIST_CALLBACK_PREFIX, parse_checklist_callback
-from app.checklist.data import CHECKLISTS, MID_NUMERIC_INPUTS_BY_ITEM_TEXT, flat_checklist_items
+from app.checklist.data import (
+    CHECKLISTS,
+    MID_NUMERIC_INPUTS_BY_ITEM_TEXT,
+    checklist_item_requires_photo,
+    flat_checklist_items,
+)
 from app.checklist.ui import (
     build_checklist_keyboard,
     build_checklist_text,
@@ -194,21 +199,28 @@ async def checklist_callback(
         section_index = int(section_default_raw)
     active_section = normalize_checklist_section(checklist_type, section_index)
 
-    # Перехват фото-пункта в open checklist
+    # Перехват фото-пункта в open checklist по YAML-флагу requires_photo.
+    # Старая эвристика по подстроке "фото холодильника" сохранена как фолбэк
+    # на случай, если конфиг временно без флага.
     if checklist_type == "open" and action == "item":
         open_items = flat_checklist_items("open")
         index_candidate = payload.value
         if 0 <= index_candidate < len(open_items):
             item_text_open = open_items[index_candidate]
-            if "фото холодильника" in item_text_open.lower():
+            needs_photo = (
+                checklist_item_requires_photo("open", index_candidate)
+                or "фото холодильника" in item_text_open.lower()
+            )
+            if needs_photo:
                 await state.set_state(OpenShiftStates.waiting_photo)
                 await state.update_data(
                     open_photo_item_index=index_candidate,
                     open_photo_shift_id=shift_id,
                 )
-                await callback.message.answer(
-                    "📷 Отправьте фото холодильника (напитки, десерты, перцы)"
-                )
+                prompt = f"📷 Отправьте фото для пункта: {item_text_open}"
+                if "фото холодильника" in item_text_open.lower():
+                    prompt = "📷 Отправьте фото холодильника (напитки, десерты, перцы)"
+                await callback.message.answer(prompt)
                 await _answer()
                 return
 

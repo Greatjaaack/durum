@@ -3,6 +3,61 @@
 Telegram-бот для управления сменами дюрюмной: чек-листы, закрытие смены, фиксация остатков и отчёты.  
 В проекте есть аналитический веб-дашборд `/dashboard` (FastAPI + Jinja2 + Chart.js) для KPI, аномалий и контроля потерь.
 
+## Quick start
+
+```bash
+# 1. Клон и .env
+git clone git@github.com:Greatjaaack/durum.git
+cd durum
+cp .env.example .env
+# открой .env и заполни BOT_TOKEN и OWNER_ID минимум
+
+# 2. Запуск (Docker, prod)
+docker compose up -d --build
+
+# 3. Логи
+docker compose logs -f bot
+docker compose logs -f dashboard
+
+# 4. Дашборд
+open http://localhost:8000/dashboard
+```
+
+Локальная разработка (без Docker):
+
+```bash
+poetry install --with dev
+poetry run pytest                           # 39 smoke-тестов
+poetry run python -m app.bot                # бот
+poetry run uvicorn app.dashboard:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Релиз, меняющий нумерацию пунктов чек-листа
+
+Если новая версия добавляет/убирает/переставляет пункты в `open_checklist`,
+сохранённые индексы в `checklist_state.completed` и
+`open_checklist_media.item_index` станут неконсистентны для уже открытых
+смен. Самый простой путь — закрыть все OPEN-смены при старте новой
+версии:
+
+```bash
+# В .env временно (только для одного запуска):
+echo "FORCE_CLOSE_OPEN_SHIFTS_ON_START=true" >> .env
+
+docker compose up -d --build --force-recreate
+docker compose logs --tail=50 bot | grep -i 'force.*close'   # должно быть "closed N open shift(s)"
+
+# После успешной выкатки выключи флаг обратно:
+sed -i '' 's/FORCE_CLOSE_OPEN_SHIFTS_ON_START=true/FORCE_CLOSE_OPEN_SHIFTS_ON_START=false/' .env
+```
+
+Альтернатива — точечный сдвиг индексов без закрытия смен:
+
+```bash
+docker compose exec bot python scripts/shift_open_index_plus_one.py            # dry-run
+docker compose exec bot python scripts/shift_open_index_plus_one.py --commit   # apply
+```
+
 ## 0. Ветки
 
 - `dev` — рабочая ветка для разработки.
@@ -95,7 +150,7 @@ docker compose up -d --force-recreate
 ### Вариант B: локально через Poetry
 
 ```bash
-poetry install
+poetry install --with dev
 poetry run python -m app.bot
 ```
 
@@ -104,6 +159,18 @@ poetry run python -m app.bot
 ```bash
 poetry run python -m uvicorn app.dashboard:app --host 0.0.0.0 --port 8000
 ```
+
+Прогон smoke-тестов (быстро, без реального Telegram):
+
+```bash
+poetry run pytest
+```
+
+Тесты лежат в `tests/`. Они валидируют YAML чек-листов, сборку мастера
+закрытия (включая отсутствие задвоения остатков), миграции схемы на
+временной SQLite и парсинг настроек. Запускать перед любым изменением
+в `app/checklist/`, `app/handlers/shift.py`, `app/db.py`,
+`app/db_schema.py` и `app/config.py`.
 
 ### Настройка `.env`
 
@@ -129,6 +196,33 @@ SHIFT_CLOSE_TIME=22:00
 ```env
 BOT_PROXY_URL=http://user:password@host:port
 ```
+
+#### Сценарий выкатки релиза, меняющего нумерацию пунктов чек-листа
+
+Если новая версия добавляет/убирает/переставляет пункты в `open_checklist`,
+сохранённые индексы выполненных пунктов в БД (`checklist_state.completed`
+и `open_checklist_media.item_index`) станут неконсистентны. Есть два
+страховочных механизма:
+
+1. **Принудительное закрытие смен при старте** (рекомендуется для
+   ночного деплоя):
+
+   ```env
+   FORCE_CLOSE_OPEN_SHIFTS_ON_START=true
+   ```
+
+   На следующем запуске бота все смены со статусом `OPEN` будут
+   принудительно закрыты. После успешной выкатки флаг лучше выключить.
+
+2. **Одноразовая миграция индексов** (если хочешь сохранить открытую смену):
+
+   ```bash
+   docker compose exec bot python scripts/shift_open_index_plus_one.py            # dry-run
+   docker compose exec bot python scripts/shift_open_index_plus_one.py --commit   # apply
+   ```
+
+   Скрипт автоматически делает резервную копию БД и применяет сдвиг
+   индексов в одной транзакции.
 
 ## 3. Структура проекта
 

@@ -112,23 +112,6 @@ def parse_non_negative_number(
     return value
 
 
-def parse_positive_number(
-    raw: str,
-) -> float | None:
-    """Преобразует строку в положительное число.
-
-    Args:
-        raw: Входная строка.
-
-    Returns:
-        Положительное число или None.
-    """
-    value = parse_non_negative_number(raw)
-    if value is None or value <= 0:
-        return None
-    return value
-
-
 def parse_close_residual_value(
     raw: str,
     item_key: str,

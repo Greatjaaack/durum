@@ -66,6 +66,16 @@ async def main() -> None:
     today = datetime.now(ZoneInfo(settings.timezone)).date().isoformat()
     await db.init(today=today)
 
+    # Опционально: перед стартом polling принудительно закрываем все OPEN-смены.
+    # Включается флагом FORCE_CLOSE_OPEN_SHIFTS_ON_START=true в .env. Использовать
+    # при выкатке релизов, меняющих нумерацию пунктов чек-листа или FSM.
+    if settings.force_close_open_shifts_on_start:
+        affected = await db.force_close_all_open_shifts()
+        logger.warning(
+            "FORCE_CLOSE_OPEN_SHIFTS_ON_START is enabled: closed %d open shift(s)",
+            affected,
+        )
+
     bot = _create_bot(settings)
     dispatcher = Dispatcher(storage=MemoryStorage())
     dispatcher.include_router(router)

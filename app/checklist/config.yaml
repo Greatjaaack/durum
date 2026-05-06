@@ -4,6 +4,10 @@ checklist_titles:
   close: "Закрытие смены"
 
 open_checklist:
+  - title: "Униформа и внешний вид"
+    items:
+      - "Головной убор надет, волосы убраны, фартук надет и чистый"
+
   - title: "Включение"
     items:
       - "Свет на кухне"
@@ -86,7 +90,8 @@ open_checklist:
       - "Маринованные огурцы нарезаны + есть запас"
       - "Разогреть суп"
       - "Перевернуть табличку [Открыто]"
-      - "Сделано фото холодильника (напитки, десерты, перцы)"
+      - text: "Сделано фото холодильника (напитки, десерты, перцы)"
+        requires_photo: true
 
   - title: "Сроки годности"
     items:
@@ -202,9 +207,12 @@ close_checklist:
   - title: "Чистота"
     items:
       - "Гриль очищен"
+      - text: "Сделано фото чистого гриля"
+        requires_photo: true
       - "Заварочный чайник очищен"
       - "Рабочие поверхности чистые (без остатков еды и жира)"
       - "В мойке нет грязной посуды"
+      - "Моечная ванна вымыта (без налёта и остатков пищи)"
       - "Посуда сушится на стеллаже"
       - "Проверен уровень мыла"
       - "Проверен уровень жидкости для посуды"
@@ -218,8 +226,10 @@ close_checklist:
 
   - title: "Фритюр"
     items:
-      - "Сделано фото корзины"
-      - "Сделано фото масла"
+      - text: "Сделано фото корзины"
+        requires_photo: true
+      - text: "Сделано фото масла"
+        requires_photo: true
       - "Масло на уровне"
 
   - title: "Выключение оборудования"
@@ -248,6 +258,7 @@ close_residual_inputs:
   "Маринованная грудка":
     key: "marinated_chicken"
     checklist_item: "Маринованная курица"
+    section_title: "Убрать продукты"
     prompt: "Введите остаток маринованной курицы (г)"
     unit: "г"
     stock_item: "мясо"
@@ -258,6 +269,7 @@ close_residual_inputs:
   "Жареная грудка":
     key: "fried_chicken"
     checklist_item: "Готовая курица"
+    section_title: "Убрать продукты"
     prompt: "Введите остаток жареной курицы (г)"
     unit: "г"
     stock_item: null
@@ -268,6 +280,7 @@ close_residual_inputs:
   "Лаваш":
     key: "lavash"
     checklist_item: "Лаваш"
+    section_title: "Убрать продукты"
     prompt: "Введите количество оставшегося лаваша (шт)"
     unit: "шт"
     stock_item: "лаваш"
@@ -278,6 +291,7 @@ close_residual_inputs:
   "Жареного лаваша":
     key: "fried_lavash"
     checklist_item: "Жареный лаваш"
+    section_title: "Убрать продукты"
     prompt: "Введите количество оставшегося жареного лаваша (шт)"
     unit: "шт"
     stock_item: null
@@ -288,6 +302,7 @@ close_residual_inputs:
   "Супа":
     key: "soup"
     checklist_item: "Суп"
+    section_title: "Убрать продукты"
     prompt: "Введите остаток супа (г)"
     unit: "г"
     stock_item: null
@@ -298,6 +313,7 @@ close_residual_inputs:
   "Соус":
     key: "sauce"
     checklist_item: "Соус"
+    section_title: "Убрать продукты"
     prompt: "Введите остаток соуса (л)"
     unit: "мл"
     stock_item: null
@@ -309,6 +325,7 @@ close_residual_inputs:
   "Остатки фри":
     key: "fry_residual"
     checklist_item: "Остатки фри списать"
+    section_title: "Убрать продукты"
     prompt: "Введите вес остатков фри (г)"
     unit: "г"
     stock_item: null

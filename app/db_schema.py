@@ -451,60 +451,6 @@ def ensure_mid_checklist_data_table(
         raise
 
 
-def ensure_camera_tables(
-    conn: sqlite3.Connection,
-) -> None:
-    """Создаёт таблицы camera_devices и camera_videos, если их нет.
-
-    Args:
-        conn: Подключение SQLite.
-
-    Returns:
-        None.
-    """
-    try:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS camera_devices (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                did TEXT UNIQUE NOT NULL,
-                name TEXT,
-                model TEXT,
-                localip TEXT,
-                is_online INTEGER DEFAULT 0,
-                firmware TEXT,
-                last_seen TEXT,
-                synced_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS camera_videos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                device_did TEXT NOT NULL,
-                start_time TEXT NOT NULL,
-                end_time TEXT,
-                duration_seconds INTEGER,
-                video_url TEXT,
-                thumbnail_url TEXT,
-                event_type TEXT,
-                synced_at TEXT NOT NULL,
-                UNIQUE(device_did, start_time)
-            )
-            """
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_camera_videos_device "
-            "ON camera_videos(device_did)"
-        )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        logger.exception("Migration ensure_camera_tables failed")
-        raise
-
-
 def ensure_employee_profiles_table(
     conn: sqlite3.Connection,
 ) -> None:
@@ -614,6 +560,76 @@ def close_stale_open_shifts(
     except Exception:
         conn.rollback()
         logger.exception("Migration close_stale_open_shifts failed")
+        raise
+
+
+def force_close_all_open_shifts(conn: sqlite3.Connection) -> int:
+    """Принудительно закрывает все смены со статусом OPEN.
+
+    Используется при старте бота, если выставлен флаг
+    ``FORCE_CLOSE_OPEN_SHIFTS_ON_START``. Выкатывая релиз, в котором
+    меняются индексы пунктов чек-листа или поведение FSM, владелец может
+    включить флаг на одну ночь, чтобы любые «зависшие» смены были закрыты
+    до запуска. Для активного штатного режима флаг должен быть выключен.
+
+    Поведение:
+    * Только смены без ``close_time`` обновляются (если по какой-то причине
+      время закрытия уже проставлено, статус подтягивается без перезаписи).
+    * Возвращает количество затронутых смен — bot.py логирует это число.
+
+    Args:
+        conn: Подключение SQLite.
+
+    Returns:
+        Число закрытых смен.
+    """
+    if not _table_exists(conn, "shifts"):
+        return 0
+    try:
+        cursor = conn.execute(
+            """
+            UPDATE shifts
+            SET status = 'CLOSED'
+            WHERE status = 'OPEN'
+            """
+        )
+        affected = int(cursor.rowcount or 0)
+        conn.commit()
+        return affected
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration force_close_all_open_shifts failed")
+        raise
+
+
+def drop_camera_tables(conn: sqlite3.Connection) -> int:
+    """Удаляет таблицы выпиленной camera_sync-фичи.
+
+    Историческая интеграция с Xiaomi-камерами (`camera_devices` и
+    `camera_videos`) больше не используется — writer выпилен, reader
+    тоже, в код подключения нет, в docker-compose камер-сервиса нет.
+    Эта миграция дочищает наследие в существующих БД.
+
+    Идемпотентна: повторный запуск ничего не делает (DROP IF EXISTS).
+
+    Args:
+        conn: Подключение SQLite.
+
+    Returns:
+        Количество фактически дропнутых таблиц (0 — если уже пусто).
+    """
+    dropped = 0
+    try:
+        for table in ("camera_videos", "camera_devices"):
+            if _table_exists(conn, table):
+                conn.execute(f"DROP TABLE IF EXISTS {table}")
+                dropped += 1
+        if dropped:
+            conn.commit()
+        return dropped
+    except Exception:
+        conn.rollback()
+        logger.exception("Migration drop_camera_tables failed")
         raise
 
 
