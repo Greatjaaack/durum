@@ -121,6 +121,94 @@
     }
   }
 
+  // ── Expandable shift rows ───────────────────────────────────────────────
+  const shiftsWrap = document.querySelector(".js-shifts-wrap");
+  const syncWrapExpansion = () => {
+    if (!shiftsWrap) return;
+    const anyOpen = !!shiftsWrap.querySelector(".shift-details-row:not(.is-hidden)");
+    shiftsWrap.classList.toggle("is-expanded", anyOpen);
+  };
+
+  document.querySelectorAll(".js-row-toggle").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const targetId = button.dataset.target;
+      if (!targetId) return;
+      const detailsRow = document.getElementById(targetId);
+      if (!detailsRow) return;
+      const isHidden = detailsRow.classList.toggle("is-hidden");
+      const expanded = !isHidden;
+      button.setAttribute("aria-expanded", expanded ? "true" : "false");
+      button.classList.toggle("is-open", expanded);
+      button.textContent = expanded ? "▾" : "▸";
+      syncWrapExpansion();
+    });
+  });
+
+  // ── Группировка смен по датам ───────────────────────────────────────────
+  const dateGroups = document.querySelectorAll(".js-date-toggle");
+
+  // Счётчик «N смен» в заголовке группы.
+  const pluralizeShifts = (n) => {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return `${n} смена`;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${n} смены`;
+    return `${n} смен`;
+  };
+
+  dateGroups.forEach((dividerRow) => {
+    const dateKey = dividerRow.dataset.dateKey;
+    if (!dateKey) return;
+    const shiftRows = document.querySelectorAll(
+      `tr.shift-row[data-date-key="${dateKey}"]`
+    );
+    const counterNode = dividerRow.querySelector(
+      `[data-date-counter="${dateKey}"]`
+    );
+    if (counterNode) {
+      counterNode.textContent = pluralizeShifts(shiftRows.length);
+    }
+
+    const toggleBtn = dividerRow.querySelector(".date-divider__toggle");
+
+    dividerRow.addEventListener("click", () => {
+      const collapsed = dividerRow.classList.toggle("is-collapsed");
+      dividerRow.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      if (toggleBtn) toggleBtn.textContent = collapsed ? "▸" : "▾";
+
+      document
+        .querySelectorAll(`tr[data-date-key="${dateKey}"]`)
+        .forEach((row) => {
+          if (row === dividerRow) return;
+          if (row.classList.contains("shift-details-row")) {
+            // При сворачивании группы — скрываем и детали; при раскрытии оставляем
+            // их свёрнутыми (юзер раскроет сам кнопкой ▸ у нужной смены).
+            if (collapsed) {
+              row.classList.add("is-hidden");
+            } else {
+              row.classList.add("is-hidden");
+            }
+          } else {
+            row.classList.toggle("is-hidden", collapsed);
+          }
+        });
+
+      // Сбрасываем состояние кнопок-стрелок смен этой группы.
+      document
+        .querySelectorAll(
+          `tr.shift-row[data-date-key="${dateKey}"] .js-row-toggle`
+        )
+        .forEach((btn) => {
+          btn.classList.remove("is-open");
+          btn.setAttribute("aria-expanded", "false");
+          btn.textContent = "▸";
+        });
+
+      syncWrapExpansion();
+    });
+  });
+
   // ── Lightbox ─────────────────────────────────────────────────────────────
   const lightbox = document.getElementById("lightbox");
   if (!lightbox) return;

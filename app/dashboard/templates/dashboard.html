@@ -151,7 +151,7 @@
   <div class="card__header">
     <h2>⏱ Смены</h2>
   </div>
-  <div class="table-wrap table-wrap--scrollable">
+  <div class="table-wrap table-wrap--scrollable js-shifts-wrap">
     <table class="shifts-table">
       <thead>
         <tr>
@@ -179,9 +179,44 @@
       </thead>
       <tbody>
         {% if shifts %}
+        {% set ns = namespace(prev_date=None, is_first_group=True) %}
         {% for row in shifts %}
-        <tr class="{{ row.row_class }}">
-          <td class="cell-date">{{ row.date_label }}</td>
+        {% if row.date_raw != ns.prev_date %}
+        {% if ns.prev_date is not none %}{% set ns.is_first_group = False %}{% endif %}
+        <tr
+          class="date-divider js-date-toggle {% if not ns.is_first_group %}is-collapsed{% endif %}"
+          data-date-key="{{ row.date_raw }}"
+          aria-expanded="{% if ns.is_first_group %}true{% else %}false{% endif %}"
+        >
+          <td colspan="15">
+            <button
+              type="button"
+              class="date-divider__toggle"
+              aria-hidden="true"
+              tabindex="-1"
+            >{% if ns.is_first_group %}▾{% else %}▸{% endif %}</button>
+            <span class="date-divider__label">{{ row.date_label }}</span>
+            <span class="date-divider__counter" data-date-counter="{{ row.date_raw }}"></span>
+          </td>
+        </tr>
+        {% set ns.prev_date = row.date_raw %}
+        {% endif %}
+        <tr
+          class="shift-row {{ row.row_class }} {% if not ns.is_first_group %}is-hidden{% endif %}"
+          data-shift-id="{{ row.id }}"
+          data-date-key="{{ row.date_raw }}"
+        >
+          <td class="cell-date">
+            <button
+              type="button"
+              class="row-toggle js-row-toggle"
+              data-target="shift-details-{{ row.id }}"
+              aria-expanded="false"
+              aria-controls="shift-details-{{ row.id }}"
+              title="Показать пункты чек-листов"
+            >▸</button>
+            <span class="cell-date__label">{{ row.date_label }}</span>
+          </td>
           <td class="cell-employee">{{ row.employee }}</td>
           <td class="cell-time">{{ row.open_started_at }}</td>
           <td class="cell-time">{{ row.opened_at }}</td>
@@ -239,10 +274,66 @@
             {% endif %}
           </td>
         </tr>
+        <tr
+          id="shift-details-{{ row.id }}"
+          class="shift-details-row is-hidden"
+          data-date-key="{{ row.date_raw }}"
+        >
+          <td colspan="15" class="shift-details-cell">
+            <div class="shift-details">
+              {% for block in [
+                ('open', 'Открытие', row.open_breakdown),
+                ('mid', 'Ведение', row.mid_breakdown),
+                ('close', 'Закрытие', row.close_breakdown)
+              ] %}
+              {% set kind = block[0] %}
+              {% set title = block[1] %}
+              {% set data = block[2] %}
+              <article class="checklist-block checklist-block--{{ kind }}">
+                <header class="checklist-block__header">
+                  <h3>{{ title }}</h3>
+                  {% if data.has_data %}
+                  <span class="checklist-block__counter">{{ data.done }} / {{ data.total }}</span>
+                  {% else %}
+                  <span class="checklist-block__counter muted">не запускался</span>
+                  {% endif %}
+                </header>
+                {% if data.has_data and data.sections %}
+                <div class="checklist-sections">
+                  {% for section in data.sections %}
+                  <details class="checklist-section {% if section.all_done %}checklist-section--ok{% else %}checklist-section--warn{% endif %}" open>
+                    <summary>
+                      <span class="checklist-section__title">{{ section.emoji }} {{ section.title }}</span>
+                      <span class="checklist-section__counter">{{ section.done }} / {{ section.total }}</span>
+                    </summary>
+                    <ul class="checklist-items">
+                      {% for item in section['items'] %}
+                      <li class="checklist-item {% if item.done %}checklist-item--done{% else %}checklist-item--miss{% endif %}">
+                        <span class="checklist-item__mark" aria-hidden="true">{% if item.done %}✓{% else %}✗{% endif %}</span>
+                        <span class="checklist-item__text">{{ item.text }}</span>
+                        {% if item.requires_photo %}
+                        <span class="checklist-item__badge" title="Требуется фото">📷</span>
+                        {% endif %}
+                      </li>
+                      {% endfor %}
+                    </ul>
+                  </details>
+                  {% endfor %}
+                </div>
+                {% elif not data.has_data %}
+                <p class="muted checklist-empty">Чек-лист не открывался для этой смены.</p>
+                {% else %}
+                <p class="muted checklist-empty">Нет пунктов.</p>
+                {% endif %}
+              </article>
+              {% endfor %}
+            </div>
+          </td>
+        </tr>
         {% endfor %}
         {% else %}
         <tr>
-          <td colspan="14">Нет данных за выбранный период</td>
+          <td colspan="15">Нет данных за выбранный период</td>
         </tr>
         {% endif %}
       </tbody>

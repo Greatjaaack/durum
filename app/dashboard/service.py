@@ -8,6 +8,7 @@ from datetime import datetime, timezone as _utc_tz
 from zoneinfo import ZoneInfo
 
 from app.checklist.data import (
+    CHECKLISTS,
     CLOSE_CHECKLIST,
     CLOSE_RESIDUAL_LABELS_BY_KEY,
     CLOSE_RESIDUAL_UNITS_BY_KEY,
@@ -733,6 +734,75 @@ def _residual_row_normalized_unit(
     return RESIDUAL_UNITS.get(item_key, "")
 
 
+def _build_checklist_breakdown(
+    checklist_type: str,
+    completed_indexes: set[int] | None,
+    has_data: bool,
+) -> dict[str, object]:
+    """Раскладывает чек-лист по секциям и пунктам с пометкой выполненности.
+
+    Args:
+        checklist_type: 'open' | 'mid' | 'close'.
+        completed_indexes: Глобальные индексы выполненных пунктов.
+        has_data: Есть ли вообще запись о чек-листе в БД.
+
+    Returns:
+        Словарь: title (str), sections (list), done (int), total (int),
+        has_data (bool).
+    """
+    sections_cfg = CHECKLISTS.get(checklist_type, [])
+    completed = completed_indexes or set()
+
+    cursor = 0
+    sections: list[dict[str, object]] = []
+    done_total = 0
+    total = 0
+    for section in sections_cfg:
+        title = str(section.get("title", "")).strip()
+        items_raw = section.get("items", []) or []
+        options_map = section.get("item_options", {}) or {}
+        emoji = CLOSE_SECTION_EMOJI_BY_TITLE.get(title, "▫️")
+
+        items_view: list[dict[str, object]] = []
+        section_done = 0
+        for local_index, item_text in enumerate(items_raw):
+            global_index = cursor + local_index
+            text = str(item_text)
+            options = options_map.get(text, {}) or {}
+            is_done = global_index in completed
+            if is_done:
+                section_done += 1
+            items_view.append(
+                {
+                    "text": text,
+                    "done": is_done,
+                    "requires_photo": bool(options.get("requires_photo", False)),
+                }
+            )
+
+        section_total = len(items_view)
+        sections.append(
+            {
+                "title": title or "Без названия",
+                "emoji": emoji,
+                "items": items_view,
+                "done": section_done,
+                "total": section_total,
+                "all_done": section_total > 0 and section_done == section_total,
+            }
+        )
+        cursor += section_total
+        total += section_total
+        done_total += section_done
+
+    return {
+        "sections": sections,
+        "done": done_total,
+        "total": total,
+        "has_data": bool(has_data),
+    }
+
+
 def _build_shift_models(
     shifts_rows: list[sqlite3.Row],
     checklist_state: dict[int, dict[str, set[int]]],
@@ -798,7 +868,8 @@ def _build_shift_models(
         else:
             close_duration_minutes = _duration_minutes(close_started_dt, closed_dt)
 
-        open_state: set[int] | None = checklist_state.get(shift_id, {}).get("open")
+        shift_checklists = checklist_state.get(shift_id, {})
+        open_state: set[int] | None = shift_checklists.get("open")
         if open_state is None:
             open_checklist_label = "—"
             open_checklist_class = "badge--neutral"
@@ -812,7 +883,17 @@ def _build_shift_models(
                 open_checklist_label = f"⚠ {open_skipped} пропущено"
                 open_checklist_class = "badge--warn"
 
-        close_state = checklist_state.get(shift_id, {}).get("close", set())
+        mid_state: set[int] | None = shift_checklists.get("mid")
+        close_state = shift_checklists.get("close", set())
+        open_breakdown = _build_checklist_breakdown(
+            "open", open_state, open_state is not None
+        )
+        mid_breakdown = _build_checklist_breakdown(
+            "mid", mid_state, mid_state is not None
+        )
+        close_breakdown = _build_checklist_breakdown(
+            "close", close_state, "close" in shift_checklists
+        )
         close_status_labels, close_done, close_total = _close_checklist_status_labels(close_state)
         sections_total = len(close_status_labels)
         sections_done = sum(1 for label in close_status_labels if label.startswith("✔"))
@@ -882,6 +963,10 @@ def _build_shift_models(
                 "close_media_items": media_items,
                 "open_media_count": len(open_media_items),
                 "open_media_items": open_media_items,
+                # Раскладка чек-листов (для раскрывающейся строки)
+                "open_breakdown": open_breakdown,
+                "mid_breakdown": mid_breakdown,
+                "close_breakdown": close_breakdown,
                 # Сырые данные для Gantt
                 "open_time_raw": open_started_raw,
                 "opened_at_raw": opened_raw,
