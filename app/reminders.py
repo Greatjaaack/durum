@@ -26,6 +26,14 @@ PERIODIC_REMINDER_HOUR_STEP = "*/2"
 # Минимальный интервал (в часах) между прохождениями mid для включения пункта в напоминание.
 MID_CHECKLIST_REMINDER_INTERVAL_HOURS = 2
 
+# Час ежедневной очистки брошенных OPEN-смен с прошедшей датой.
+# Запускается ночью (после смены даты, до времени открытия), чтобы
+# закрывать «зависшие» смены не завися от рестарта контейнера дашборда.
+STALE_SHIFTS_CLEANUP_HOUR = 4
+
+# Минута ежедневной очистки брошенных OPEN-смен.
+STALE_SHIFTS_CLEANUP_MINUTE = 0
+
 # Час ежедневной проверки заказа продукции.
 PRODUCT_ORDER_REMINDER_HOUR = 19
 
@@ -150,6 +158,26 @@ def setup_scheduler(
         """
         logger.debug("Scheduler job: product_order_reminder")
         await _send_to_active_employees(PRODUCT_ORDER_REMINDER_TEXT)
+
+    async def close_stale_shifts_job() -> None:
+        """Закрывает брошенные OPEN-смены с прошедшей датой.
+
+        Ежедневный аналог проверки, выполняемой при старте дашборда, но не
+        зависящий от рестарта контейнера. Активная смена всегда имеет
+        date = сегодня, поэтому фильтр по дате её не затрагивает.
+
+        Args:
+            Нет параметров.
+
+        Returns:
+            None.
+        """
+        logger.debug("Scheduler job: close_stale_open_shifts")
+        today = datetime.now(timezone).date().isoformat()
+        try:
+            await db.close_stale_open_shifts(today)
+        except Exception:
+            logger.exception("Failed to close stale open shifts")
 
     async def notify_if_shift_not_opened() -> None:
         """Уведомляет владельца, если смена не открыта к дедлайну старта.
@@ -299,6 +327,16 @@ def setup_scheduler(
             timezone=timezone,
         ),
         id="product_order_reminder",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        close_stale_shifts_job,
+        trigger=CronTrigger(
+            hour=STALE_SHIFTS_CLEANUP_HOUR,
+            minute=STALE_SHIFTS_CLEANUP_MINUTE,
+            timezone=timezone,
+        ),
+        id="close_stale_open_shifts",
         replace_existing=True,
     )
     scheduler.add_job(

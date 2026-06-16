@@ -26,7 +26,6 @@
       <tbody>
         {% for emp in employees %}
         <tr class="{% if not emp.is_active %}row-inactive{% endif %}">
-          <form method="post" action="/dashboard/employees/profile" style="display:contents">
             <td class="cell-id">{{ emp.telegram_id }}</td>
             <td>{{ emp.raw_name }}</td>
             <td>
@@ -49,9 +48,8 @@
             <td>
               <input type="hidden" name="telegram_id" value="{{ emp.telegram_id }}" form="form-emp-{{ emp.telegram_id }}" />
               <button type="submit" form="form-emp-{{ emp.telegram_id }}" class="btn-small">Сохранить</button>
+              <form id="form-emp-{{ emp.telegram_id }}" method="post" action="/dashboard/employees/profile" style="display:none"></form>
             </td>
-          </form>
-          <form id="form-emp-{{ emp.telegram_id }}" method="post" action="/dashboard/employees/profile" style="display:none"></form>
         </tr>
         {% endfor %}
       </tbody>

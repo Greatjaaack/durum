@@ -380,6 +380,29 @@ tr.row-shift-open td:first-child {
   border-left: 3px solid #34d399;
 }
 
+.shift-close-form {
+  margin: 4px 0 0;
+}
+
+.btn-close-shift {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: #b91c1c;
+  background: #fff;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.btn-close-shift:hover {
+  color: #fff;
+  background: #ef4444;
+  border-color: #ef4444;
+}
+
 /* Аномалия: статус CLOSED но нет времени закрытия */
 tr.row-shift-anomaly {
   background: #fff7ed;
