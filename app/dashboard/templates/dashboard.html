@@ -217,7 +217,20 @@
             >▸</button>
             <span class="cell-date__label">{{ row.date_label }}</span>
           </td>
-          <td class="cell-employee">{{ row.employee }}</td>
+          <td class="cell-employee">
+            {{ row.employee }}
+            {% if row.status == 'OPEN' %}
+            <form
+              method="post"
+              action="/dashboard/shifts/close"
+              class="shift-close-form"
+              onsubmit="return confirm('Принудительно закрыть смену «{{ row.employee }}» от {{ row.date_label }}? Действие нельзя отменить.');"
+            >
+              <input type="hidden" name="shift_id" value="{{ row.id }}">
+              <button type="submit" class="btn-close-shift" title="Принудительно закрыть открытую смену">Закрыть смену</button>
+            </form>
+            {% endif %}
+          </td>
           <td class="cell-time">{{ row.open_started_at }}</td>
           <td class="cell-time">{{ row.opened_at }}</td>
           <td class="cell-duration">{{ row.opening_duration_label }}</td>

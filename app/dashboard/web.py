@@ -45,6 +45,7 @@ from app.db_schema import (
     ensure_shift_periodic_residuals_table as ensure_shift_periodic_residuals_schema_table,
     ensure_shift_status_column as ensure_shift_status_schema_column,
     ensure_shift_status_index as ensure_shift_status_schema_index,
+    force_close_shift as force_close_shift_schema,
 )
 
 
@@ -596,6 +597,40 @@ def update_employee_schedule(
     finally:
         conn.close()
     return RedirectResponse(url="/dashboard/employees", status_code=303)
+
+
+@app.post("/dashboard/shifts/close")
+def close_open_shift(
+    request: Request,
+    shift_id: int = Form(...),
+):
+    """Принудительно закрывает случайно оставшуюся открытой смену.
+
+    Срабатывает по кнопке «Закрыть смену» в таблице смен. Действует только
+    на смену со статусом OPEN — повторно закрытую смену не трогает.
+
+    Args:
+        request: HTTP-запрос (для возврата на исходную страницу с фильтрами).
+        shift_id: Идентификатор смены.
+
+    Returns:
+        HTTP-редирект обратно на страницу дашборда (с сохранением фильтров).
+    """
+    tz = ZoneInfo(os.getenv("BOT_TIMEZONE", "UTC"))
+    now_iso = datetime.now(tz).isoformat(timespec="seconds")
+    conn = _connect()
+    try:
+        affected = force_close_shift_schema(conn, shift_id, now_iso)
+        logger.info("Dashboard force-closed shift id=%s (affected=%s)", shift_id, affected)
+    except Exception:
+        logger.exception("Failed to force-close shift id=%s", shift_id)
+    finally:
+        conn.close()
+    # Возвращаемся на ту же страницу дашборда, чтобы не сбрасывать
+    # выбранный управляющим период/фильтры.
+    referer = request.headers.get("referer")
+    redirect_url = referer if referer and DASHBOARD_ROUTE in referer else DASHBOARD_ROUTE
+    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 @app.get("/dashboard/media/{media_id}", name="dashboard_media")

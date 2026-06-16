@@ -162,6 +162,20 @@ class Database:
         with self._lock:
             close_stale_open_shifts_schema(self._conn, today=today)
 
+    async def close_stale_open_shifts(self, today: str | None = None) -> None:
+        """Асинхронная обёртка над `_close_stale_open_shifts` для планировщика.
+
+        Позволяет ежедневному джобу APScheduler закрывать брошенные смены
+        с прошедшей датой без привязки к рестарту контейнера.
+
+        Args:
+            today: Сегодняшняя дата YYYY-MM-DD в timezone приложения.
+
+        Returns:
+            None.
+        """
+        await asyncio.to_thread(self._close_stale_open_shifts, today)
+
     async def force_close_all_open_shifts(self) -> int:
         """Принудительно закрывает ВСЕ смены со статусом OPEN.
 

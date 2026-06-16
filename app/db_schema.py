@@ -563,6 +563,50 @@ def close_stale_open_shifts(
         raise
 
 
+def force_close_shift(
+    conn: sqlite3.Connection,
+    shift_id: int,
+    closed_at: str,
+) -> int:
+    """Принудительно закрывает одну OPEN-смену по её id (для дашборда).
+
+    Используется кнопкой «Закрыть смену» в админке, когда смена случайно
+    осталась открытой. В отличие от ``force_close_all_open_shifts`` действует
+    только на одну смену и только если она ещё ``OPEN`` (повторно закрытую
+    не трогает). Проставляет время закрытия и пометку источника, если они
+    ещё не заданы, чтобы смена не отображалась как аномалия на дашборде.
+
+    Args:
+        conn: Подключение SQLite.
+        shift_id: Идентификатор смены.
+        closed_at: Время закрытия в ISO-формате (таймзона приложения).
+
+    Returns:
+        Число затронутых смен (0 или 1).
+    """
+    if not _table_exists(conn, "shifts"):
+        return 0
+    try:
+        cursor = conn.execute(
+            """
+            UPDATE shifts
+            SET status = 'CLOSED',
+                close_time = COALESCE(close_time, ?),
+                closed_at = COALESCE(closed_at, ?),
+                closed_by_name = COALESCE(closed_by_name, ?)
+            WHERE id = ? AND status = 'OPEN'
+            """,
+            (closed_at, closed_at, "Закрыто через дашборд", shift_id),
+        )
+        affected = int(cursor.rowcount or 0)
+        conn.commit()
+        return affected
+    except Exception:
+        conn.rollback()
+        logger.exception("force_close_shift failed for shift_id=%s", shift_id)
+        raise
+
+
 def force_close_all_open_shifts(conn: sqlite3.Connection) -> int:
     """Принудительно закрывает все смены со статусом OPEN.
 

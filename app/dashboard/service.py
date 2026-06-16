@@ -417,16 +417,22 @@ def _fetch_shifts(
     if not _table_exists(conn, "shifts"):
         return []
 
-    conditions: list[str] = []
+    date_conditions: list[str] = []
     params: list[object] = []
     if filters.date_from:
-        conditions.append("s.date >= ?")
+        date_conditions.append("s.date >= ?")
         params.append(filters.date_from)
     if filters.date_to:
-        conditions.append("s.date <= ?")
+        date_conditions.append("s.date <= ?")
         params.append(filters.date_to)
 
-    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    # OPEN-смены показываем всегда, даже если их дата вне выбранного периода.
+    # Иначе «зависшая» вчерашняя смена выпадает из дефолтного вида (где
+    # date_from = сегодня), и кнопка «Закрыть смену» становится недостижимой.
+    if date_conditions:
+        where_clause = f"WHERE ({' AND '.join(date_conditions)}) OR s.status = 'OPEN'"
+    else:
+        where_clause = ""
     query = f"""
     SELECT
         s.id,
