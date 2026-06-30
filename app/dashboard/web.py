@@ -62,6 +62,11 @@ def _auth_secret() -> str:
     return os.getenv("DASHBOARD_SECRET", "change-me-secret-key")
 
 
+def _cookie_secure() -> bool:
+    """Ставить ли флаг Secure на cookie сессии (включается за HTTPS-прокси)."""
+    return os.getenv("DASHBOARD_COOKIE_SECURE", "").strip().lower() in {"1", "true", "yes"}
+
+
 def _auth_credentials() -> tuple[str, str]:
     username = os.getenv("DASHBOARD_USERNAME", "").strip()
     password = os.getenv("DASHBOARD_PASSWORD", "").strip()
@@ -391,6 +396,7 @@ def login_submit(
         value=token,
         httponly=True,
         samesite="lax",
+        secure=_cookie_secure(),
         max_age=60 * 60 * 24 * 30,
     )
     return response

@@ -1,0 +1,71 @@
+# Продакшен-конфигурация (самодостаточная, НЕ overlay к docker-compose.yml).
+# Отличия от dev:
+#   - Caddy терминирует HTTPS (авто-сертификат Let's Encrypt по домену из $DOMAIN);
+#   - dashboard наружу НЕ публикуется (expose, не ports) — доступен только через Caddy
+#     по 443, пароль дашборда больше не летит по сети открытым текстом;
+#   - тома data/logs общие с dev-конфигом (имя проекта = имя папки), данные не теряются.
+#
+# Запуск:  docker compose -f docker-compose.prod.yml up -d --build
+# Нужен заполненный .env с DOMAIN=<ваш домен> (см. .env.example).
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /data/shifts.db
+      MEDIA_DIR: /data/media
+      LOG_DIR: /app/logs
+      TZ: ${BOT_TIMEZONE:-Europe/Moscow}
+    volumes:
+      - ./data:/data
+      - ./logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  dashboard:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /data/shifts.db
+      MEDIA_DIR: /data/media
+      TZ: ${BOT_TIMEZONE:-Europe/Moscow}
+      # За Caddy всегда HTTPS — выставляем cookie сессии с флагом Secure.
+      DASHBOARD_COOKIE_SECURE: "true"
+    command: ["python", "-m", "uvicorn", "app.dashboard:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      - ./data:/data
+      - ./logs:/app/logs
+    expose:
+      - "8000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Реверс-прокси с автоматическим HTTPS. Проксирует всё на dashboard:8000.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?нужно задать DOMAIN в .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - dashboard
+
+volumes:
+  caddy-data:
+  caddy-config:
