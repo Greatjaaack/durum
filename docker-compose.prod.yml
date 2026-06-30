@@ -1,12 +1,18 @@
 # Продакшен-конфигурация (самодостаточная, НЕ overlay к docker-compose.yml).
+#
+# ВАЖНО: на сервере уже работает Caddy от проекта аналитики (dashboards-caddy-1),
+# он держит порты 80/443. Второй Caddy эти порты занять не сможет, поэтому здесь
+# СВОЕГО Caddy нет — дашборд бота подключается к сети аналитики, а тот Caddy
+# проксирует на него домен bot.iskendy.ru (см. DEPLOY.md → "Общий reverse-proxy").
+#
 # Отличия от dev:
-#   - Caddy терминирует HTTPS (авто-сертификат Let's Encrypt по домену из $DOMAIN);
-#   - dashboard наружу НЕ публикуется (expose, не ports) — доступен только через Caddy
-#     по 443, пароль дашборда больше не летит по сети открытым текстом;
+#   - dashboard наружу НЕ публикуется (expose, не ports) — доступен только через
+#     общий Caddy по 443; пароль дашборда не летит по сети открытым текстом;
+#   - dashboard подключён к внешней сети аналитики, чтобы Caddy резолвил его по имени;
 #   - тома data/logs общие с dev-конфигом (имя проекта = имя папки), данные не теряются.
 #
 # Запуск:  docker compose -f docker-compose.prod.yml up -d --build
-# Нужен заполненный .env с DOMAIN=<ваш домен> (см. .env.example).
+# Предварительно: внешняя сеть аналитики должна существовать (обычно dashboards_default).
 services:
   bot:
     build: .
@@ -44,28 +50,18 @@ services:
       - ./logs:/app/logs
     expose:
       - "8000"
+    networks:
+      - default        # общий том/связь с bot
+      - proxy          # сеть, где живёт Caddy аналитики
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
 
-  # Реверс-прокси с автоматическим HTTPS. Проксирует всё на dashboard:8000.
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      DOMAIN: ${DOMAIN:?нужно задать DOMAIN в .env}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      - dashboard
-
-volumes:
-  caddy-data:
-  caddy-config:
+networks:
+  # Внешняя сеть, созданная проектом аналитики. Имя проверить: docker network ls
+  # (обычно <папка_аналитики>_default, например dashboards_default).
+  proxy:
+    external: true
+    name: dashboards_default
