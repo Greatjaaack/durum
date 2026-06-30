@@ -1,0 +1,15 @@
+# Caddy выдаёт и продлевает TLS-сертификат для $DOMAIN автоматически (Let's Encrypt).
+# Условие: на $DOMAIN указывает A-запись DNS → IP сервера, а порты 80 и 443 открыты.
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy dashboard:8000
+}
+
+# --- Запуск без домена (только по IP) ---
+# Закомментируйте блок выше и раскомментируйте этот. Caddy отдаст self-signed TLS
+# (браузер ругнётся на сертификат — для теста ок, для прода нужен домен).
+# :443 {
+# 	tls internal
+# 	encode gzip
+# 	reverse_proxy dashboard:8000
+# }
