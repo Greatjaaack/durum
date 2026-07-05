@@ -44,7 +44,10 @@ services:
       TZ: ${BOT_TIMEZONE:-Europe/Moscow}
       # За Caddy всегда HTTPS — выставляем cookie сессии с флагом Secure.
       DASHBOARD_COOKIE_SECURE: "true"
-    command: ["python", "-m", "uvicorn", "app.dashboard:app", "--host", "0.0.0.0", "--port", "8000"]
+    # --proxy-headers + forwarded-allow-ips=*: доверяем X-Forwarded-Proto от Caddy,
+    # иначе uvicorn считает схему http и url_for() рендерит http:// ссылки на статику,
+    # которые браузер режет как mixed content на https-странице (CSS/JS не грузятся).
+    command: ["python", "-m", "uvicorn", "app.dashboard:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
     volumes:
       - ./data:/data
       - ./logs:/app/logs
